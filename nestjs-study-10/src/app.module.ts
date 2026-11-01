@@ -1,10 +1,14 @@
 import { Module } from '@nestjs/common';
-import { AppController } from './app.controller.js';
-import { AppService } from './app.service.js';
+
+import { AiModule } from './ai/ai.module.js';
 
 @Module({
-  imports: [],
-  controllers: [AppController],
-  providers: [AppService],
+  imports: [
+    AiModule.register({
+      provider: 'openai',
+      timeout: 30000,
+      maxRetries: 3,
+    }),
+  ],
 })
 export class AppModule {}
