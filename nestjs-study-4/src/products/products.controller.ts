@@ -14,9 +14,10 @@ import {
 import { ProductsService } from './products.service.js';
 
 import { CreateProductDto } from './dto/create-product.dto.js';
+import { PositiveIntPipe } from './pipes/positive-int.pipe.js';
 
 import {
-  Product,
+  type Product,
   ProductStatus,
 } from './interfaces/product.interface.js';
 
@@ -40,6 +41,11 @@ export class ProductsController {
     return this.productsService.findOne(id);
   }
 
+  @Get('positive/:id')
+  findPositive(@Param('id', PositiveIntPipe) id: number): Product {
+    return this.productsService.findOne(id);
+  }
+
   // 3. DefaultValuePipe + ParseIntPipe
   @Get('pagination')
   getPagination(
@@ -60,7 +66,8 @@ export class ProductsController {
   @Get('filter/active')
   filterActive(
     @Query('active', ParseBoolPipe)
-    active: boolean,
+    // 全局 ValidationPipe 会提前转换 Boolean 元数据；unknown 保留原始输入给 ParseBoolPipe。
+    active: unknown,
   ) {
     return {
       active,

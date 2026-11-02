@@ -4,7 +4,7 @@ import {
 } from '@nestjs/common';
 
 import {
-  Product,
+  type Product,
   ProductStatus,
 } from './interfaces/product.interface.js';
 
