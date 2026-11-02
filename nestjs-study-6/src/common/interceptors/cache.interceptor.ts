@@ -6,16 +6,14 @@ import {
 } from '@nestjs/common';
 
 import { Observable, of, tap } from 'rxjs';
+import type { Request } from 'express';
 
 @Injectable()
 export class CacheInterceptor implements NestInterceptor {
   private readonly cache = new Map<string, unknown>();
 
-  intercept(
-    context: ExecutionContext,
-    next: CallHandler,
-  ): Observable<unknown> {
-    const request = context.switchToHttp().getRequest();
+  intercept(context: ExecutionContext, next: CallHandler): Observable<unknown> {
+    const request = context.switchToHttp().getRequest<Request>();
 
     const key = `${request.method}:${request.url}`;
 
@@ -29,7 +27,8 @@ export class CacheInterceptor implements NestInterceptor {
 
     return next.handle().pipe(
       tap((data) => {
-        this.cache.set(key, data);
+        // 保存快照，避免 Service 修改原数组时悄悄改变缓存。
+        this.cache.set(key, structuredClone(data));
       }),
     );
   }

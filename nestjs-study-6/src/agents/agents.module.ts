@@ -7,6 +7,7 @@ import { LoggingInterceptor } from '../common/interceptors/logging.interceptor.j
 import { TransformInterceptor } from '../common/interceptors/transform.interceptor.js';
 import { CacheInterceptor } from '../common/interceptors/cache.interceptor.js';
 import { TimeoutInterceptor } from '../common/interceptors/timeout.interceptor.js';
+import { ErrorsInterceptor } from '../common/interceptors/errors.interceptor.js';
 
 @Module({
   controllers: [AgentsController],
@@ -19,6 +20,7 @@ import { TimeoutInterceptor } from '../common/interceptors/timeout.interceptor.j
     TransformInterceptor,
     CacheInterceptor,
     TimeoutInterceptor,
+    ErrorsInterceptor,
   ],
 
   exports: [AgentsService],

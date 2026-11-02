@@ -6,15 +6,13 @@ import {
 } from '@nestjs/common';
 
 import type { Observable } from 'rxjs';
+import type { Request } from 'express';
 import { tap } from 'rxjs';
 
 @Injectable()
 export class LoggingInterceptor implements NestInterceptor {
-  intercept(
-    context: ExecutionContext,
-    next: CallHandler,
-  ): Observable<unknown> {
-    const request = context.switchToHttp().getRequest();
+  intercept(context: ExecutionContext, next: CallHandler): Observable<unknown> {
+    const request = context.switchToHttp().getRequest<Request>();
 
     const method = request.method;
     const url = request.url;
@@ -26,9 +24,7 @@ export class LoggingInterceptor implements NestInterceptor {
     return next.handle().pipe(
       tap({
         next: () => {
-          console.log(
-            `[After] ${method} ${url} - ${Date.now() - start}ms`,
-          );
+          console.log(`[After] ${method} ${url} - ${Date.now() - start}ms`);
         },
         error: (error: unknown) => {
           console.log(

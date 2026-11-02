@@ -6,6 +6,8 @@ import {
   Param,
   ParseIntPipe,
   UseInterceptors,
+  UsePipes,
+  ValidationPipe,
 } from '@nestjs/common';
 
 import { AgentsService } from './agents.service.js';
@@ -19,10 +21,15 @@ import { ErrorsInterceptor } from '../common/interceptors/errors.interceptor.js'
 
 @Controller('agents')
 @UseInterceptors(LoggingInterceptor)
+@UsePipes(
+  new ValidationPipe({
+    whitelist: true,
+    forbidNonWhitelisted: true,
+    transform: true,
+  }),
+)
 export class AgentsController {
-  constructor(
-    private readonly agentsService: AgentsService,
-  ) {}
+  constructor(private readonly agentsService: AgentsService) {}
 
   // 1. 普通查询：日志 + 统一响应
   @Get()
@@ -55,18 +62,14 @@ export class AgentsController {
   // 5. 查询单个 Agent
   @Get(':id')
   @UseInterceptors(TransformInterceptor)
-  findOne(
-    @Param('id', ParseIntPipe) id: number,
-  ) {
+  findOne(@Param('id', ParseIntPipe) id: number) {
     return this.agentsService.findOne(id);
   }
 
   // 6. 创建 Agent
   @Post()
   @UseInterceptors(TransformInterceptor)
-  create(
-    @Body() dto: CreateAgentDto,
-  ) {
+  create(@Body() dto: CreateAgentDto) {
     return this.agentsService.create(dto);
   }
 }
