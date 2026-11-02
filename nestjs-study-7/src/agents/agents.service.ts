@@ -1,7 +1,6 @@
-import {
-  Injectable,
-  NotFoundException,
-} from '@nestjs/common';
+import { Injectable, NotFoundException } from '@nestjs/common';
+import type { CreateAgentDto } from './dto/create-agent.dto.js';
+import type { UpdateAgentDto } from './dto/update-agent.dto.js';
 
 export interface Agent {
   id: number;
@@ -37,14 +36,44 @@ export class AgentsService {
     },
   ];
 
+  private nextId = 4;
+
   findPublic(): Agent[] {
     return this.agents.filter((agent) => agent.isPublic);
   }
 
   findByOwner(ownerId: string): Agent[] {
-    return this.agents.filter(
-      (agent) => agent.ownerId === ownerId,
+    return this.agents.filter((agent) => agent.ownerId === ownerId);
+  }
+
+  create(ownerId: string, dto: CreateAgentDto): Agent {
+    const agent: Agent = {
+      id: this.nextId++,
+      name: dto.name,
+      description: dto.description,
+      isPublic: dto.isPublic,
+      ownerId,
+    };
+    this.agents.push(agent);
+    return agent;
+  }
+
+  findOneForUser(id: number, ownerId: string): Agent {
+    const agent = this.agents.find(
+      (item) => item.id === id && item.ownerId === ownerId,
     );
+    if (!agent) {
+      throw new NotFoundException('Agent 不存在');
+    }
+    return agent;
+  }
+
+  updateForUser(id: number, ownerId: string, dto: UpdateAgentDto): Agent {
+    const agent = this.findOneForUser(id, ownerId);
+    if (dto.name !== undefined) agent.name = dto.name;
+    if (dto.description !== undefined) agent.description = dto.description;
+    if (dto.isPublic !== undefined) agent.isPublic = dto.isPublic;
+    return agent;
   }
 
   findAll(): Agent[] {
@@ -52,9 +81,7 @@ export class AgentsService {
   }
 
   remove(id: number): { message: string } {
-    const index = this.agents.findIndex(
-      (agent) => agent.id === id,
-    );
+    const index = this.agents.findIndex((agent) => agent.id === id);
 
     if (index === -1) {
       throw new NotFoundException('Agent 不存在');

@@ -8,36 +8,34 @@ import {
   Param,
   ParseIntPipe,
   UseGuards,
-  UsePipes,
-  ValidationPipe,
 } from '@nestjs/common';
 
 import { AgentsService } from './agents.service.js';
 
-import { CurrentUser } from '../common/decorators/current-user.decorator.js';
-import { Public } from '../common/decorators/public.decorator.js';
-import { Roles } from '../common/decorators/roles.decorator.js';
-import { Auth } from '../common/decorators/auth.decorator.js';
+import { CurrentUser } from '../auth/decorators/current-user.decorator.js';
+import { Public } from '../auth/decorators/public.decorator.js';
+import { Roles } from '../auth/decorators/roles.decorator.js';
+import { Auth } from '../auth/decorators/auth.decorator.js';
 
-import { AuthGuard } from '../common/guards/auth.guard.js';
-import { RolesGuard } from '../common/guards/roles.guard.js';
+import { AuthGuard } from '../auth/guards/auth.guard.js';
+import { RolesGuard } from '../auth/guards/roles.guard.js';
 
 import { CreateAgentDto } from './dto/create-agent.dto.js';
 import { UpdateAgentDto } from './dto/update-agent.dto.js';
+import { AgentBodyPipe } from './pipes/agent-body.pipe.js';
 
-import type { AuthUser } from '../common/interfaces/auth-user.interface.js';
+import type { AuthUser } from '../auth/interfaces/auth-user.interface.js';
 
 @Controller('agents')
 export class AgentsController {
-  constructor(
-    private readonly agentsService: AgentsService,
-  ) {}
+  constructor(private readonly agentsService: AgentsService) {}
 
   // ==========================================
   // 1. 公开接口：@Public()
   // ==========================================
 
   @Public()
+  @UseGuards(AuthGuard)
   @Get('public')
   findPublicAgents() {
     return this.agentsService.findPublic();
@@ -49,9 +47,7 @@ export class AgentsController {
 
   @Get('me')
   @UseGuards(AuthGuard)
-  getCurrentUser(
-    @CurrentUser() user: AuthUser,
-  ) {
+  getCurrentUser(@CurrentUser() user: AuthUser) {
     return {
       message: '当前登录用户',
       user,
@@ -64,9 +60,7 @@ export class AgentsController {
 
   @Get('my-id')
   @UseGuards(AuthGuard)
-  getMyId(
-    @CurrentUser('id') userId: number,
-  ) {
+  getMyId(@CurrentUser('id') userId: string) {
     return {
       userId,
     };
@@ -78,26 +72,19 @@ export class AgentsController {
 
   @Get()
   @UseGuards(AuthGuard)
-  findAll(
-    @CurrentUser('id') userId: number,
-  ) {
-    return this.agentsService.findByUserId(userId);
+  findAll(@CurrentUser('id') userId: string) {
+    return this.agentsService.findByOwner(userId);
   }
 
   // ==========================================
-  // 5. 创建 Agent：DTO + ValidationPipe
+  // 5. 创建 Agent：DTO + 自定义输入管道
   // ==========================================
 
   @Post()
   @UseGuards(AuthGuard)
-  @UsePipes(new ValidationPipe({
-    whitelist: true,
-    forbidNonWhitelisted: true,
-    transform: true,
-  }))
   create(
-    @CurrentUser('id') userId: number,
-    @Body() dto: CreateAgentDto,
+    @CurrentUser('id') userId: string,
+    @Body(new AgentBodyPipe()) dto: CreateAgentDto,
   ) {
     return this.agentsService.create(userId, dto);
   }
@@ -108,7 +95,7 @@ export class AgentsController {
 
   @Get('admin/all')
   @UseGuards(AuthGuard, RolesGuard)
-  @Roles('admin')
+  @Roles(['admin'])
   findAllForAdmin() {
     return this.agentsService.findAll();
   }
@@ -119,9 +106,7 @@ export class AgentsController {
 
   @Delete('admin/:id')
   @Auth('admin')
-  removeForAdmin(
-    @Param('id', ParseIntPipe) id: number,
-  ) {
+  removeForAdmin(@Param('id', ParseIntPipe) id: number) {
     return this.agentsService.remove(id);
   }
 
@@ -133,14 +118,10 @@ export class AgentsController {
   @UseGuards(AuthGuard)
   update(
     @Param('id', ParseIntPipe) id: number,
-    @CurrentUser('id') userId: number,
-    @Body() dto: UpdateAgentDto,
+    @CurrentUser('id') userId: string,
+    @Body(new AgentBodyPipe(true)) dto: UpdateAgentDto,
   ) {
-    return this.agentsService.updateForUser(
-      id,
-      userId,
-      dto,
-    );
+    return this.agentsService.updateForUser(id, userId, dto);
   }
 
   // ==========================================
@@ -151,11 +132,8 @@ export class AgentsController {
   @UseGuards(AuthGuard)
   findOne(
     @Param('id', ParseIntPipe) id: number,
-    @CurrentUser('id') userId: number,
+    @CurrentUser('id') userId: string,
   ) {
-    return this.agentsService.findOneForUser(
-      id,
-      userId,
-    );
+    return this.agentsService.findOneForUser(id, userId);
   }
 }

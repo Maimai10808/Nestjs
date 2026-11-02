@@ -1,20 +1,12 @@
 import { Module } from '@nestjs/common';
-
 import { AgentsController } from './agents.controller.js';
 import { AgentsService } from './agents.service.js';
-
-import { AuthGuard } from '../common/guards/auth.guard.js';
-import { RolesGuard } from '../common/guards/roles.guard.js';
+import { AuthModule } from '../auth/auth.module.js';
 
 @Module({
+  imports: [AuthModule],
   controllers: [AgentsController],
-
-  providers: [
-    AgentsService,
-    AuthGuard,
-    RolesGuard,
-  ],
-
+  providers: [AgentsService],
   exports: [AgentsService],
 })
 export class AgentsModule {}
