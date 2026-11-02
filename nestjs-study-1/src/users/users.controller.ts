@@ -101,7 +101,7 @@ export class UsersController {
   ) {
     return {
       userAgent,
-      authorization,
+      authorizationPresent: Boolean(authorization),
     };
   }
 
@@ -129,7 +129,12 @@ export class UsersController {
     return {
       method: req.method,
       url: req.originalUrl,
-      headers: req.headers,
+      // 只回显学习所需字段，避免泄露 Cookie、Authorization 等凭证。
+      headers: {
+        host: req.headers.host,
+        'user-agent': req.headers['user-agent'],
+        'content-type': req.headers['content-type'],
+      },
       query: req.query,
     };
   }
@@ -320,9 +325,7 @@ export class UsersController {
     @Param('id', ParseIntPipe) id: number,
     @Body() dto: CreateUserDto,
   ) {
-    // 学习示例：复用更新逻辑
-    // 实际 PUT 通常应实现完整替换语义
-    return this.usersService.update(id, dto);
+    return this.usersService.replace(id, dto);
   }
 
   // =====================================================

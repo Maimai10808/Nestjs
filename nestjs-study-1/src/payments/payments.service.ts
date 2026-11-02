@@ -13,7 +13,7 @@ export interface PaymentResult {
 export class PaymentsService {
   // 模拟支付
   pay(amount: number): PaymentResult {
-    if (amount <= 0) {
+    if (typeof amount !== 'number' || !Number.isFinite(amount) || amount <= 0) {
       throw new BadRequestException('支付金额必须大于 0');
     }
 

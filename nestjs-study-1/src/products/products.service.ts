@@ -1,4 +1,4 @@
-import { Injectable, NotFoundException } from '@nestjs/common';
+import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
 
 export interface Product {
   id: number;
@@ -44,12 +44,12 @@ export class ProductsService {
   decreaseStock(id: number, quantity: number): void {
     const product = this.findOne(id);
 
-    if (quantity <= 0) {
-      throw new Error('购买数量必须大于 0');
+    if (!Number.isInteger(quantity) || quantity <= 0) {
+      throw new BadRequestException('购买数量必须是正整数');
     }
 
     if (product.stock < quantity) {
-      throw new Error('库存不足');
+      throw new BadRequestException('库存不足');
     }
 
     product.stock -= quantity;

@@ -93,6 +93,14 @@ export class UsersService {
     return user;
   }
 
+  // PUT 保留服务端字段，但移除本次请求未提供的可选业务字段。
+  replace(id: number, dto: CreateUserDto): User {
+    const existing = this.findOne(id);
+    const replacement: User = { ...dto, id, createdAt: existing.createdAt };
+    this.users = this.users.map((user) => user.id === id ? replacement : user);
+    return replacement;
+  }
+
   // 删除用户
   remove(id: number) {
     const user = this.findOne(id);
