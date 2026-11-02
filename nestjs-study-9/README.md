@@ -1,132 +1,156 @@
-<p align="center">
-  <a href="http://nestjs.com/" target="blank"><img src="https://nestjs.com/img/logo-small.svg" width="120" alt="Nest Logo" /></a>
-</p>
+# Study 9：等待 Redis 就绪的异步 Provider
 
-[circleci-image]: https://img.shields.io/circleci/build/github/nestjs/nest/master?token=abc123def456
-[circleci-url]: https://circleci.com/gh/nestjs/nest
+## 项目介绍
 
-  <p align="center">A progressive <a href="http://nodejs.org" target="_blank">Node.js</a> framework for building efficient and scalable server-side applications.</p>
-    <p align="center">
-<a href="https://www.npmjs.com/~nestjscore" target="_blank"><img src="https://img.shields.io/npm/v/@nestjs/core.svg" alt="NPM Version" /></a>
-<a href="https://www.npmjs.com/~nestjscore" target="_blank"><img src="https://img.shields.io/npm/l/@nestjs/core.svg" alt="Package License" /></a>
-<a href="https://www.npmjs.com/~nestjscore" target="_blank"><img src="https://img.shields.io/npm/dm/@nestjs/common.svg" alt="NPM Downloads" /></a>
-<a href="https://circleci.com/gh/nestjs/nest" target="_blank"><img src="https://img.shields.io/circleci/build/github/nestjs/nest/master" alt="CircleCI" /></a>
-<a href="https://discord.gg/G7Qnnhy" target="_blank"><img src="https://img.shields.io/badge/discord-online-brightgreen.svg" alt="Discord"/></a>
-<a href="https://opencollective.com/nest#backer" target="_blank"><img src="https://opencollective.com/nest/backers/badge.svg" alt="Backers on Open Collective" /></a>
-<a href="https://opencollective.com/nest#sponsor" target="_blank"><img src="https://opencollective.com/nest/sponsors/badge.svg" alt="Sponsors on Open Collective" /></a>
-  <a href="https://paypal.me/kamilmysliwiec" target="_blank"><img src="https://img.shields.io/badge/Donate-PayPal-ff3f59.svg" alt="Donate us"/></a>
-    <a href="https://opencollective.com/nest#sponsor"  target="_blank"><img src="https://img.shields.io/badge/Support%20us-Open%20Collective-41B883.svg" alt="Support us"></a>
-  <a href="https://twitter.com/nestframework" target="_blank"><img src="https://img.shields.io/twitter/follow/nestframework.svg?style=social&label=Follow" alt="Follow us on Twitter"></a>
-</p>
-  <!--[![Backers on Open Collective](https://opencollective.com/nest/backers/badge.svg)](https://opencollective.com/nest#backer)
-  [![Sponsors on Open Collective](https://opencollective.com/nest/sponsors/badge.svg)](https://opencollective.com/nest#sponsor)-->
+本章模拟 Agent 任务状态的写入与查询：创建任务时把 `pending` 保存到 Redis，再通过任务 ID 读取状态。重点不是任务调度，而是让依赖 Redis 的业务 Service **在连接成功以后才创建**。
 
-## Description
+这里的 Redis 是真实外部依赖，没有默认内存替代；Agent 任务只是状态演示，没有后台执行器、队列、模型调用或用户系统。学习前建议先理解 Study 8 的自定义 Token 和工厂 Provider。
 
-[Nest](https://github.com/nestjs/nest) framework TypeScript starter repository.
+## 学习目标与业务场景
 
-## Project setup
+- 理解 `useFactory` 可以返回 Promise：Nest 会等待工厂完成，而不是把尚未连接的客户端交给业务代码。
+- 用 `REDIS_CLIENT` Token 隔开连接创建和任务业务；`AgentsService` 不负责自己连接 Redis。
+- 通过模块的 `exports` 和 `imports` 共享同一个客户端，避免每个请求重新建立连接。
+- 观察依赖启动失败和应用关闭时的资源释放，区分“HTTP 服务起来了”与“外部依赖已准备好”。
 
-```bash
-$ pnpm install
+真实系统往往要在启动阶段准备连接池或 SDK。把准备过程放在异步 Provider 中，可以让启动失败直接暴露，而不是等第一位用户访问时才发现连接未建立。
+
+## 项目结构
+
+```text
+src/
+├── main.ts                         # 创建应用，开启关闭信号钩子
+├── app.module.ts                   # 接入 AgentsModule
+├── app.controller.ts               # 保留的脚手架文件，未注册路由
+├── app.controller.spec.ts
+├── app.service.ts
+├── agents/
+│   ├── agents.module.ts            # 导入 RedisModule
+│   ├── agents.controller.ts        # 创建/查询任务的 HTTP 入口
+│   └── agents.service.ts           # 使用客户端读写状态
+└── redis/
+    ├── redis.tokens.ts             # REDIS_CLIENT 注入标识
+    ├── redis.provider.ts           # 异步连接工厂
+    └── redis.module.ts             # 导出客户端并负责关闭
+ test/app.e2e-spec.ts               # 替换客户端后的 HTTP 测试
 ```
 
-## Compile and run the project
+本章入口是 `/agents/tasks/:id`，没有注册 `GET /`；看到根路径 404 不代表启动失败。
 
-```bash
-# development
-$ pnpm run start
+## 核心知识讲解
 
-# watch mode
-$ pnpm run start:dev
+### 连接为什么放在工厂中
 
-# production mode
-$ pnpm run start:prod
+阅读 [redis.provider.ts](./src/redis/redis.provider.ts)：
+
+```ts
+{
+  provide: REDIS_CLIENT,
+  useFactory: async () => {
+    // 创建客户端、绑定 error 事件……
+    await client.connect();
+    return client;
+  },
+}
 ```
 
-## Run tests
+`provide` 是容器查找依赖时使用的标识，`useFactory` 决定依赖如何创建。工厂返回的 Promise 完成以后，Nest 才能向下构造依赖它的 `AgentsService`。
 
-```bash
-# unit tests
-$ pnpm run test
+连接地址来自 `REDIS_URL`，默认 `redis://localhost:6379`。当前代码设置 5 秒连接超时并关闭自动重连，连接失败会销毁客户端并让启动失败；这适合观察初始化过程，不是生产环境的高可用策略。
 
-# e2e tests
-$ pnpm run test:e2e
+### 接口类型和运行时 Token 各司其职
 
-# test coverage
-$ pnpm run test:cov
+[agents.service.ts](./src/agents/agents.service.ts) 中：
+
+```ts
+constructor(
+  @Inject(REDIS_CLIENT) private readonly redis: RedisClientType,
+) {}
 ```
 
-## Deployment
+`RedisClientType` 只负责 TypeScript 检查；接口在 JavaScript 中不存在，因此容器需要 `REDIS_CLIENT` 这个实际值。`RedisModule` 导出该 Token，`AgentsModule` 导入模块，业务层才有权限声明这个依赖。
 
-When you're ready to deploy your NestJS application to production, there are some key steps you can take to ensure it runs as efficiently as possible. Check out the [deployment documentation](https://docs.nestjs.com/deployment) for more information.
+### 状态存储与生命周期
 
-If you are looking for a cloud-based platform to deploy your NestJS application, check out [Mau](https://mau.nestjs.com), our official platform for deploying NestJS applications on AWS. Mau makes deployment straightforward and fast, requiring just a few simple steps:
+创建任务写入 `agent:task:<id>`，值固定为 `pending`；查询不存在的键返回 `status: null`。重复创建同一 ID 会再次写入 `pending`，这里没有唯一性约束和状态机。
 
-```bash
-$ pnpm install -g @nestjs/mau
-$ mau deploy
+[redis.module.ts](./src/redis/redis.module.ts) 中的 `RedisShutdownService` 在应用关闭时调用 `quit()`。`main.ts` 开启 `enableShutdownHooks()`，使 Ctrl+C/SIGTERM 能触发 Nest 的关闭流程。正常启动过程中不要把客户端放进每个请求的 Service 构造函数中反复创建。
+
+## 核心执行流程
+
+```mermaid
+flowchart TD
+  A[启动应用] --> B[异步工厂连接 Redis]
+  B -->|成功| C[创建 AgentsService 并监听端口]
+  B -->|失败| D[释放失败客户端并终止启动]
+  C --> E[POST 或 GET /agents/tasks/:id]
+  E --> F[AgentsService]
+  F --> G[已连接的 Redis 客户端]
+  C -->|应用关闭| H[ShutdownService 调用 quit]
 ```
 
-With Mau, you can deploy your application in just a few clicks, allowing you to focus on building features rather than managing infrastructure.
+## 如何运行
 
-## Observability
+使用 Node.js 22（22.12 及以上）或 24+ 与 pnpm。本次审查环境是 Node.js 24.5.0、pnpm 12.3.4；项目声明 Nest `^12.0.1`、TypeScript `^6.0.2`，当前锁文件安装为 Nest 12.3.2、TypeScript 6.0.3，Redis 客户端为 6.3.1。保留本章锁文件，不需要全局 Nest CLI。
 
-In production applications, observability is essential for understanding how your system behaves, detecting issues early, and maintaining reliable performance.
-
-[NestJS Observe](https://observe.nestjs.com) automatically instruments your NestJS application, giving you deep visibility into your system with minimal setup:
-
-- **Distributed tracing:** Follow requests across services and understand how they flow through your system.
-- **Waterfall analysis:** Visualize request execution and identify slow operations, bottlenecks, and unexpected delays.
-- **Performance analysis:** Analyze application performance in real time and quickly pinpoint areas that need optimization.
-- **Metrics:** Track key application and infrastructure metrics to understand system health and performance trends.
-- **Logging:** Centralize and correlate logs with traces and other telemetry to make debugging easier.
-- **Error tracking:** Detect errors quickly and investigate their root causes with the surrounding context.
-- **SLA monitoring:** Track service-level objectives and identify when your application is approaching or exceeding defined thresholds.
-- **Alarms and alerts:** Set up alerts for critical errors, performance degradation, SLA violations, and other anomalies so your team can react quickly.
-
-To add it to this project, run this and approve the code it prints at [observe.nestjs.com/link](https://observe.nestjs.com/link) - signing up for free if you have no account:
+**先准备一个可连接的 Redis 实例**。仓库不自带 Redis 服务；默认地址使用本机 6379 端口。无需 AI API Key、数据库或 Observe 凭据。
 
 ```bash
-$ npx @nestjs/observe link
+cd nestjs-study-9
+pnpm install --frozen-lockfile
+pnpm build
+pnpm exec tsc --noEmit
+REDIS_URL=redis://localhost:6379 pnpm start:dev
+# 或构建后运行；PORT 可改，默认 3000
+REDIS_URL=redis://localhost:6379 PORT=3009 pnpm start:prod
 ```
 
-It installs `@nestjs/observe`, wires it into `AppModule` and `main.ts`, and writes the app key and secret into `.env`, which every `nest start` script (`start`, `start:dev`, `start:debug`) then loads. In production, set `OBSERVE_APP_KEY` and `OBSERVE_APP_SECRET` in the environment instead.
+同一时间只运行一个占用 3000 端口的 Study。自定义端口后，下面请求地址也要相应修改。环境变量通过命令行或 shell 设置，本章不依赖自动读取 `.env`。
 
-Or do it by hand:
+## 如何验证
+
+确认启动日志先出现 Redis 连接成功，再出现业务 Service 创建成功和 HTTP 监听信息。
 
 ```bash
-$ pnpm install @nestjs/observe
+# 201：写入 pending
+curl -i -X POST http://localhost:3000/agents/tasks/research-1
+# 200：读取刚才的状态
+curl -i http://localhost:3000/agents/tasks/research-1
+# 200：status 为 null
+curl -i http://localhost:3000/agents/tasks/not-created
 ```
 
-Then follow the [setup guide](https://docs.nestjs.com/observability/sdk) - it takes a single import and an app key.
+第二次请求应得到 `{"taskId":"research-1","status":"pending"}`。停止 Nest 后重新启动，只要 Redis 中的键仍存在，状态就仍能读到；Redis 本身是否持久化由外部服务配置决定。
 
-The free plan needs no payment details and covers 300,000 events a month. You can also browse the [live demo](https://www.observe-demo.nestjs.com/dashboard) first - the whole dashboard over a busy service's data, with nothing to install.
+停止当前应用后，用一个确定未监听的 Redis 地址启动，例如 `REDIS_URL=redis://127.0.0.1:6399 pnpm start`。预期启动失败，不能继续提供任务接口。不要对正在使用的 Redis 执行清空操作。
 
-## Resources
+```bash
+pnpm test
+pnpm test:e2e
+pnpm lint
+```
 
-Check out a few resources that may come in handy when working with NestJS:
+`test:e2e` 先构建，再使用编译后的真实模块执行 HTTP 测试，并用内存客户端替换 `REDIS_CLIENT`。它覆盖任务读写和关闭回调，**不能证明真实 Redis 连接、网络故障或关闭信号已经通过**；这些请按上面的实连步骤验证。
 
-- Visit the [NestJS Documentation](https://docs.nestjs.com) to learn more about the framework.
-- For questions and support, please visit our [Discord channel](https://discord.gg/G7Qnnhy).
-- To dive deeper and get more hands-on experience, check out our official video [courses](https://courses.nestjs.com/).
-- Deploy your application to AWS with the help of [NestJS Mau](https://mau.nestjs.com) in just a few clicks.
-- Auto-instrument your application with [NestJS Observe](https://observe.nestjs.com). Distributed tracing, metrics, and logging made easy. Error tracking and performance monitoring for your NestJS applications.
-- Visualize your application graph and interact with the NestJS application in real-time using [NestJS Devtools](https://devtools.nestjs.com).
-- Need help with your project (part-time to full-time)? Check out our official [enterprise support](https://enterprise.nestjs.com).
-- To stay in the loop and get updates, follow us on [X](https://x.com/nestframework) and [LinkedIn](https://linkedin.com/company/nestjs).
-- Looking for a job, or have a job to offer? Check out our official [Jobs board](https://jobs.nestjs.com).
+## 推荐阅读顺序
 
-## Support
+1. [redis.tokens.ts](./src/redis/redis.tokens.ts)：先知道容器识别哪一个依赖。
+2. [redis.provider.ts](./src/redis/redis.provider.ts)：找到 Promise、连接成功和失败的分界。
+3. [redis.module.ts](./src/redis/redis.module.ts)：理解导出和释放资源为什么放在同一模块。
+4. [agents.module.ts](./src/agents/agents.module.ts) → [agents.service.ts](./src/agents/agents.service.ts)：追踪依赖如何进入业务代码。
+5. [agents.controller.ts](./src/agents/agents.controller.ts) → [main.ts](./src/main.ts)：最后把 HTTP 入口、监听和关闭信号连起来。
 
-Nest is an MIT-licensed open source project. It can grow thanks to the sponsors and support by the amazing backers. If you'd like to join them, please [read more here](https://docs.nestjs.com/support).
+## 思考与练习
 
-## Stay in touch
+1. 给任务增加一个“完成”操作，观察如何保持读写使用同一个 Redis 键规则。
+2. 给任务状态增加过期时间，再比较“未创建”和“已过期”在当前查询结果中能否区分。
+3. 临时在连接工厂中加入等待，观察业务 Service 构造日志和 HTTP 监听出现的时间。
+4. 为 Redis 客户端定义业务实际需要的最小接口，思考如何让单元测试替身保持类型约束。
 
-- Author - [Kamil Myśliwiec](https://twitter.com/kammysliwiec)
-- Website - [https://nestjs.com](https://nestjs.com/)
-- Twitter - [@nestframework](https://twitter.com/nestframework)
+## 本章总结与边界
 
-## License
+本章把 Study 8 的 Provider 工厂推进到异步初始化：容器负责等依赖准备好，业务 Service 只使用就绪对象。关闭钩子则补上资源的另一半生命周期，后续 Study 15 会更集中地研究启动和关闭顺序。
 
-Nest is [MIT licensed](https://github.com/nestjs/nest/blob/master/LICENSE).
+本章没有认证和用户隔离，任何调用者都可以按任务 ID 读写示例状态；只使用无敏感信息的实验数据。真实任务系统还需要身份校验、授权、状态流转和可靠执行机制，当前代码没有实现这些能力。
+
+参考：[异步 Provider](https://docs.nestjs.com/fundamentals/async-providers)、[生命周期](https://docs.nestjs.com/fundamentals/lifecycle-events)。阅读文档时回到本章实际安装版本和源码核对。

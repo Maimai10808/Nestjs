@@ -1,132 +1,166 @@
-<p align="center">
-  <a href="http://nestjs.com/" target="blank"><img src="https://nestjs.com/img/logo-small.svg" width="120" alt="Nest Logo" /></a>
-</p>
+# Study 2：用商品下单理解模块边界
 
-[circleci-image]: https://img.shields.io/circleci/build/github/nestjs/nest/master?token=abc123def456
-[circleci-url]: https://circleci.com/gh/nestjs/nest
+[返回学习路线](../README.md)
 
-  <p align="center">A progressive <a href="http://nodejs.org" target="_blank">Node.js</a> framework for building efficient and scalable server-side applications.</p>
-    <p align="center">
-<a href="https://www.npmjs.com/~nestjscore" target="_blank"><img src="https://img.shields.io/npm/v/@nestjs/core.svg" alt="NPM Version" /></a>
-<a href="https://www.npmjs.com/~nestjscore" target="_blank"><img src="https://img.shields.io/npm/l/@nestjs/core.svg" alt="Package License" /></a>
-<a href="https://www.npmjs.com/~nestjscore" target="_blank"><img src="https://img.shields.io/npm/dm/@nestjs/common.svg" alt="NPM Downloads" /></a>
-<a href="https://circleci.com/gh/nestjs/nest" target="_blank"><img src="https://img.shields.io/circleci/build/github/nestjs/nest/master" alt="CircleCI" /></a>
-<a href="https://discord.gg/G7Qnnhy" target="_blank"><img src="https://img.shields.io/badge/discord-online-brightgreen.svg" alt="Discord"/></a>
-<a href="https://opencollective.com/nest#backer" target="_blank"><img src="https://opencollective.com/nest/backers/badge.svg" alt="Backers on Open Collective" /></a>
-<a href="https://opencollective.com/nest#sponsor" target="_blank"><img src="https://opencollective.com/nest/sponsors/badge.svg" alt="Sponsors on Open Collective" /></a>
-  <a href="https://paypal.me/kamilmysliwiec" target="_blank"><img src="https://img.shields.io/badge/Donate-PayPal-ff3f59.svg" alt="Donate us"/></a>
-    <a href="https://opencollective.com/nest#sponsor"  target="_blank"><img src="https://img.shields.io/badge/Support%20us-Open%20Collective-41B883.svg" alt="Support us"></a>
-  <a href="https://twitter.com/nestframework" target="_blank"><img src="https://img.shields.io/twitter/follow/nestframework.svg?style=social&label=Follow" alt="Follow us on Twitter"></a>
-</p>
-  <!--[![Backers on Open Collective](https://opencollective.com/nest/backers/badge.svg)](https://opencollective.com/nest#backer)
-  [![Sponsors on Open Collective](https://opencollective.com/nest/sponsors/badge.svg)](https://opencollective.com/nest#sponsor)-->
+## 项目介绍
 
-## Description
+本章模拟电商中的商品查询与订单创建。一次下单需要查商品、算金额、生成待支付记录；重点是让 `OrdersModule` 使用其他模块公开的能力，而不在订单模块里复制商品和支付服务。
 
-[Nest](https://github.com/nestjs/nest) framework TypeScript starter repository.
+学习本章后，你应该能够回答：一个类已经标记 `@Injectable()`，为什么另一个模块仍然可能无法注入它？
 
-## Project setup
+## 学习目标
 
-```bash
-$ pnpm install
+- 分清 `imports`、`providers`、`controllers`、`exports` 四个位置各自管理什么。
+- 沿订单调用链理解构造函数 DI：业务依赖写在类中，实例装配交给容器。
+- 判断模块应公开什么服务，而不是把每个内部类都导出。
+- 用成功订单和失败请求验证模块协作，而不是只看到应用启动就认为完成。
+
+## 真实业务场景
+
+商品初始为 MacBook Pro、iPhone、iPad。`POST /orders` 接受 `productId` 和正整数 `quantity`，计算总金额并返回一条 `PENDING` 支付记录。
+
+这里没有真实扣款、库存、订单持久化或订单列表。每次请求构造新的订单对象和支付记录，主要演示服务协作；不要将返回的 `paymentId` 视为支付平台的凭证。
+
+## 项目结构
+
+```text
+src/
+├── orders/
+│   ├── orders.controller.ts
+│   ├── orders.module.ts
+│   └── orders.service.ts
+├── payments/
+│   ├── payments.module.ts
+│   └── payments.service.ts
+├── products/
+│   ├── products.controller.ts
+│   ├── products.module.ts
+│   └── products.service.ts
+├── statistics/
+│   ├── statistics.module.ts
+│   └── statistics.service.ts
+├── app.controller.spec.ts
+├── app.controller.ts
+├── app.module.ts
+├── app.service.ts
+└── main.ts
 ```
 
-## Compile and run the project
+`AppModule` 实际导入 `ProductsModule` 与 `OrdersModule`。`AppController`、`AppService` 是未接入根模块的脚手架；`StatisticsModule` 和 `StatisticsService` 是保留的扩展代码，目前没有 HTTP 入口，不应尝试不存在的 `/statistics` 路由。
 
-```bash
-# development
-$ pnpm run start
+## 核心知识讲解
 
-# watch mode
-$ pnpm run start:dev
+### 模块是容器边界
 
-# production mode
-$ pnpm run start:prod
+[ProductsModule](src/products/products.module.ts) 的定义很短，却决定了商品能力怎样被使用：
+
+```ts
+@Module({
+  controllers: [ProductsController],
+  providers: [ProductsService],
+  exports: [ProductsService],
+})
 ```
 
-## Run tests
+- `controllers` 让 HTTP 路由被 Nest 发现。
+- `providers` 告诉容器如何创建本模块可用的服务。
+- `exports` 把服务公开给导入本模块的模块。
 
-```bash
-# unit tests
-$ pnpm run test
+只有 `@Injectable()` 不等于注册，也不等于公开。文件中的 `import { ProductsService }` 只让 TypeScript 能引用类；模块的 `imports: [ProductsModule]` 才建立容器的可见性关系。
 
-# e2e tests
-$ pnpm run test:e2e
+### 订单导入能力，不重新创建商品服务
 
-# test coverage
-$ pnpm run test:cov
+[OrdersModule](src/orders/orders.module.ts) 导入商品和支付两个模块；[OrdersService](src/orders/orders.service.ts) 用构造函数声明依赖：
+
+```ts
+constructor(
+  private readonly productsService: ProductsService,
+  private readonly paymentsService: PaymentsService,
+) {}
 ```
 
-## Deployment
+如果把同一个 `ProductsService` 再放到订单模块的 `providers`，会注册一个本地实例，容易造成不同模块读到不同内存状态。当前实现使用导出服务，由容器管理复用关系。
 
-When you're ready to deploy your NestJS application to production, there are some key steps you can take to ensure it runs as efficiently as possible. Check out the [deployment documentation](https://docs.nestjs.com/deployment) for more information.
+[PaymentsModule](src/payments/payments.module.ts) 只提供服务，没有 Controller。模块不必都有 HTTP 入口；支付在本章是由订单调用的内部能力。
 
-If you are looking for a cloud-based platform to deploy your NestJS application, check out [Mau](https://mau.nestjs.com), our official platform for deploying NestJS applications on AWS. Mau makes deployment straightforward and fast, requiring just a few simple steps:
+### 业务验证与 HTTP 参数解析
 
-```bash
-$ pnpm install -g @nestjs/mau
-$ mau deploy
+[OrdersController](src/orders/orders.controller.ts) 对两个 Body 字段使用 `ParseIntPipe`，拒绝非整数；Service 再限制购买数量必须大于零。整数解析不代表满足业务规则，`-1` 虽是整数仍不能购买。
+
+[ProductsService](src/products/products.service.ts) 在商品不存在时抛 `NotFoundException`，经 Nest 映射为 404。订单只做当前示例的同步步骤，Service 的异常会沿调用链返回 HTTP。
+
+### 统计模块适合什么练习
+
+[StatisticsModule](src/statistics/statistics.module.ts) 已导入商品模块，[StatisticsService](src/statistics/statistics.service.ts) 用商品服务计算数量。它展示同一公开能力如何被第二个模块消费，但未被根模块启用。先理解这个状态，再决定如何接入；不要把“源码里存在”误认为“接口已经上线”。
+
+## 核心执行流程
+
+```mermaid
+flowchart TD
+  A[POST /orders] --> B[OrdersController: ParseIntPipe]
+  B --> C[OrdersService: 校验数量]
+  C --> D[ProductsService: 查商品]
+  D --> E[计算总金额]
+  E --> F[PaymentsService: 创建 PENDING 记录]
+  F --> G[返回本次订单对象]
 ```
 
-With Mau, you can deploy your application in just a few clicks, allowing you to focus on building features rather than managing infrastructure.
+## 如何运行
 
-## Observability
-
-In production applications, observability is essential for understanding how your system behaves, detecting issues early, and maintaining reliable performance.
-
-[NestJS Observe](https://observe.nestjs.com) automatically instruments your NestJS application, giving you deep visibility into your system with minimal setup:
-
-- **Distributed tracing:** Follow requests across services and understand how they flow through your system.
-- **Waterfall analysis:** Visualize request execution and identify slow operations, bottlenecks, and unexpected delays.
-- **Performance analysis:** Analyze application performance in real time and quickly pinpoint areas that need optimization.
-- **Metrics:** Track key application and infrastructure metrics to understand system health and performance trends.
-- **Logging:** Centralize and correlate logs with traces and other telemetry to make debugging easier.
-- **Error tracking:** Detect errors quickly and investigate their root causes with the surrounding context.
-- **SLA monitoring:** Track service-level objectives and identify when your application is approaching or exceeding defined thresholds.
-- **Alarms and alerts:** Set up alerts for critical errors, performance degradation, SLA violations, and other anomalies so your team can react quickly.
-
-To add it to this project, run this and approve the code it prints at [observe.nestjs.com/link](https://observe.nestjs.com/link) - signing up for free if you have no account:
+本项目独立安装和运行，无数据库、Redis 或支付平台依赖。建议 Node.js 24（实测 24.5.0）、pnpm 12.3.4。Nest 声明 `^12.0.1`，锁定/实际安装 12.3.2；TypeScript 声明 `^6.0.2`，实际 6.0.3。
 
 ```bash
-$ npx @nestjs/observe link
+pnpm install --frozen-lockfile
+pnpm start:dev
+# 以下检查另开终端，仍在本项目目录
+pnpm build
+pnpm exec tsc --noEmit --incremental false
+pnpm lint
+pnpm test
+pnpm test:e2e
+pnpm start:prod
 ```
 
-It installs `@nestjs/observe`, wires it into `AppModule` and `main.ts`, and writes the app key and secret into `.env`, which every `nest start` script (`start`, `start:dev`, `start:debug`) then loads. In production, set `OBSERVE_APP_KEY` and `OBSERVE_APP_SECRET` in the environment instead.
+默认监听 3000；例如 `PORT=3102 pnpm start:dev` 可以更换端口。不需要环境变量。`start:prod` 使用本地构建产物，不会发布服务。`test:e2e` 先 build 再测试，确保测试经过实际 ESM 依赖注入链。
 
-Or do it by hand:
+## 如何验证
 
 ```bash
-$ pnpm install @nestjs/observe
+curl -s http://localhost:3000/products
+curl -s http://localhost:3000/products/1
+# 201；totalAmount=30000，payment.status=PENDING
+curl -i -X POST http://localhost:3000/orders \
+  -H 'Content-Type: application/json' -d '{"productId":1,"quantity":2}'
+# 404：商品不存在
+curl -i -X POST http://localhost:3000/orders \
+  -H 'Content-Type: application/json' -d '{"productId":999,"quantity":1}'
+# 400：数量不满足业务规则
+curl -i -X POST http://localhost:3000/orders \
+  -H 'Content-Type: application/json' -d '{"productId":1,"quantity":0}'
+# 400：路径ID无法解析为整数
+curl -i http://localhost:3000/products/not-a-number
 ```
 
-Then follow the [setup guide](https://docs.nestjs.com/observability/sdk) - it takes a single import and an app key.
+根路径 `/` 没有注册路由，返回 404 正常。现有 [AppController 单元测试](src/app.controller.spec.ts) 只检查保留的脚手架类；真正的本章运行证据在 [e2e](test/app.e2e-spec.ts)，覆盖订单、参数和异常。
 
-The free plan needs no payment details and covers 300,000 events a month. You can also browse the [live demo](https://www.observe-demo.nestjs.com/dashboard) first - the whole dashboard over a busy service's data, with nothing to install.
+## 推荐阅读顺序
 
-## Resources
+1. [AppModule](src/app.module.ts)：确认真正启动的模块图。
+2. [OrdersModule](src/orders/orders.module.ts)：找清订单依赖来自哪些模块。
+3. [ProductsModule](src/products/products.module.ts) → [PaymentsModule](src/payments/payments.module.ts)：核对各自的 exports。
+4. [OrdersController](src/orders/orders.controller.ts) → [OrdersService](src/orders/orders.service.ts)：从一次 HTTP 请求跟到服务协作。
+5. [ProductsService](src/products/products.service.ts) → [PaymentsService](src/payments/payments.service.ts)：看被调用的具体行为。
+6. [StatisticsModule](src/statistics/statistics.module.ts)：最后把同样的规则用于第二个消费方。
 
-Check out a few resources that may come in handy when working with NestJS:
+## 思考与练习
 
-- Visit the [NestJS Documentation](https://docs.nestjs.com) to learn more about the framework.
-- For questions and support, please visit our [Discord channel](https://discord.gg/G7Qnnhy).
-- To dive deeper and get more hands-on experience, check out our official video [courses](https://courses.nestjs.com/).
-- Deploy your application to AWS with the help of [NestJS Mau](https://mau.nestjs.com) in just a few clicks.
-- Auto-instrument your application with [NestJS Observe](https://observe.nestjs.com). Distributed tracing, metrics, and logging made easy. Error tracking and performance monitoring for your NestJS applications.
-- Visualize your application graph and interact with the NestJS application in real-time using [NestJS Devtools](https://devtools.nestjs.com).
-- Need help with your project (part-time to full-time)? Check out our official [enterprise support](https://enterprise.nestjs.com).
-- To stay in the loop and get updates, follow us on [X](https://x.com/nestframework) and [LinkedIn](https://linkedin.com/company/nestjs).
-- Looking for a job, or have a job to offer? Check out our official [Jobs board](https://jobs.nestjs.com).
+1. 临时移除商品模块的 `exports`，启动后阅读依赖解析错误，再恢复。
+2. 给统计模块添加 Controller 并导入 AppModule，通过真实 HTTP 查询商品数量。
+3. 给订单返回值增加明确的 interface，避免将数据库实体等同于 HTTP 响应。
+4. 如果要保存订单历史，应把内存数组放在哪里？实现后验证重启会发生什么。
 
-## Support
+## 本章总结
 
-Nest is an MIT-licensed open source project. It can grow thanks to the sponsors and support by the amazing backers. If you'd like to join them, please [read more here](https://docs.nestjs.com/support).
+本章的重点是模块可见性：注册、导入、导出各有作用。Controller 负责输入，订单服务组织用例，商品和支付服务各自提供能力。下一章沿着真实请求继续观察中间件与异常处理；本章的统计模块可以作为扩展练习，尚不是完整统计功能。
 
-## Stay in touch
-
-- Author - [Kamil Myśliwiec](https://twitter.com/kammysliwiec)
-- Website - [https://nestjs.com](https://nestjs.com/)
-- Twitter - [@nestframework](https://twitter.com/nestframework)
-
-## License
-
-Nest is [MIT licensed](https://github.com/nestjs/nest/blob/master/LICENSE).
+参考：[Modules](https://docs.nestjs.com/modules)、[Providers](https://docs.nestjs.com/providers)。

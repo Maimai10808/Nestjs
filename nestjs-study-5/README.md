@@ -1,132 +1,162 @@
-<p align="center">
-  <a href="http://nestjs.com/" target="blank"><img src="https://nestjs.com/img/logo-small.svg" width="120" alt="Nest Logo" /></a>
-</p>
+# Study 5：用 Guard 区分认证与角色授权
 
-[circleci-image]: https://img.shields.io/circleci/build/github/nestjs/nest/master?token=abc123def456
-[circleci-url]: https://circleci.com/gh/nestjs/nest
+本章模拟一个共享 AI Agent 目录：访客可以看公开列表，登录用户可以查询，开发者可以创建，管理员可以删除。重点是让请求在进入 Controller 之前经过身份与角色检查，而不是接入真实登录系统。
 
-  <p align="center">A progressive <a href="http://nodejs.org" target="_blank">Node.js</a> framework for building efficient and scalable server-side applications.</p>
-    <p align="center">
-<a href="https://www.npmjs.com/~nestjscore" target="_blank"><img src="https://img.shields.io/npm/v/@nestjs/core.svg" alt="NPM Version" /></a>
-<a href="https://www.npmjs.com/~nestjscore" target="_blank"><img src="https://img.shields.io/npm/l/@nestjs/core.svg" alt="Package License" /></a>
-<a href="https://www.npmjs.com/~nestjscore" target="_blank"><img src="https://img.shields.io/npm/dm/@nestjs/common.svg" alt="NPM Downloads" /></a>
-<a href="https://circleci.com/gh/nestjs/nest" target="_blank"><img src="https://img.shields.io/circleci/build/github/nestjs/nest/master" alt="CircleCI" /></a>
-<a href="https://discord.gg/G7Qnnhy" target="_blank"><img src="https://img.shields.io/badge/discord-online-brightgreen.svg" alt="Discord"/></a>
-<a href="https://opencollective.com/nest#backer" target="_blank"><img src="https://opencollective.com/nest/backers/badge.svg" alt="Backers on Open Collective" /></a>
-<a href="https://opencollective.com/nest#sponsor" target="_blank"><img src="https://opencollective.com/nest/sponsors/badge.svg" alt="Sponsors on Open Collective" /></a>
-  <a href="https://paypal.me/kamilmysliwiec" target="_blank"><img src="https://img.shields.io/badge/Donate-PayPal-ff3f59.svg" alt="Donate us"/></a>
-    <a href="https://opencollective.com/nest#sponsor"  target="_blank"><img src="https://img.shields.io/badge/Support%20us-Open%20Collective-41B883.svg" alt="Support us"></a>
-  <a href="https://twitter.com/nestframework" target="_blank"><img src="https://img.shields.io/twitter/follow/nestframework.svg?style=social&label=Follow" alt="Follow us on Twitter"></a>
-</p>
-  <!--[![Backers on Open Collective](https://opencollective.com/nest/backers/badge.svg)](https://opencollective.com/nest#backer)
-  [![Sponsors on Open Collective](https://opencollective.com/nest/sponsors/badge.svg)](https://opencollective.com/nest#sponsor)-->
+## 学习目标
 
-## Description
+- 理解认证解决“你是谁”，授权解决“你能做什么”，分别由两个 Guard 负责。
+- 用路由元数据描述权限，让 Controller 保持清晰。
+- 理解 `ExecutionContext` 如何提供当前路由与 HTTP 请求。
+- 区分 401（身份无效）、403（权限不足）和 404（资源不存在）。
 
-[Nest](https://github.com/nestjs/nest) framework TypeScript starter repository.
+## 业务场景与边界
 
-## Project setup
+Agent 是所有用户共享的目录资源，本章没有“个人 Agent”或多租户隔离。`POST /agents` 固定创建名为 `New Agent` 的模拟记录，不读取请求体；重启会恢复初始数据。
 
-```bash
-$ pnpm install
+[AuthService](./src/auth/auth.service.ts) 在服务端用 Map 保存三个演示 Token：
+
+| Token            | 服务端角色 | 允许操作         |
+| ---------------- | ---------- | ---------------- |
+| `demo-viewer`    | viewer     | 查询             |
+| `demo-developer` | developer  | 查询、创建       |
+| `demo-admin`     | admin      | 查询、创建、删除 |
+
+这些公开的固定字符串只适合本地实验，没有签名、过期、撤销、密码校验或 Token 签发流程。客户端传来的角色字段不会参与授权判断。真实项目需要验证可信凭证，再从可信身份来源取得角色。
+
+## 项目结构
+
+```text
+src/
+├── main.ts
+├── app.module.ts
+├── app.controller.ts / app.service.ts / app.controller.spec.ts
+├── agents/
+│   ├── agents.module.ts
+│   ├── agents.controller.ts
+│   └── agents.service.ts
+└── auth/
+    ├── auth.module.ts
+    ├── auth.service.ts
+    ├── auth.types.ts
+    ├── auth.guard.ts
+    ├── roles.guard.ts
+    ├── public.decorator.ts
+    └── roles.decorator.ts
+test/
+└── app.e2e-spec.ts
 ```
 
-## Compile and run the project
+`AppModule` 实际导入 `AuthModule` 和 `AgentsModule`。保留的 `AppController`、`AppService` 是脚手架阅读材料，没有注册为 HTTP 路由，因此 `/` 返回 404。
 
-```bash
-# development
-$ pnpm run start
+## 核心机制
 
-# watch mode
-$ pnpm run start:dev
+### 先识别身份，再判断角色
 
-# production mode
-$ pnpm run start:prod
+[AgentsController](./src/agents/agents.controller.ts) 的类级装饰器：
+
+```ts
+@UseGuards(AuthGuard, RolesGuard)
 ```
 
-## Run tests
+这使所有 Agent 路由先运行 `AuthGuard`，再运行 `RolesGuard`。认证成功后，`AuthGuard` 将服务端查到的用户写入 `request.user`；角色 Guard 读取它，不再次解析客户端数据。
 
-```bash
-# unit tests
-$ pnpm run test
+[AuthGuard](./src/auth/auth.guard.ts) 要求严格的 `Bearer <token>` 格式。缺失、无效 Token 或多余片段均返回 401。不要把给请求对象添加一个 TypeScript 类型误认为完成认证，决定身份的是 `AuthService.validateToken()` 的结果。
 
-# e2e tests
-$ pnpm run test:e2e
+### 装饰器只写元数据，Guard 才执行规则
 
-# test coverage
-$ pnpm run test:cov
+[Roles](./src/auth/roles.decorator.ts) 使用 `Reflector.createDecorator<Role[]>()` 创建具有类型的元数据键。创建路由声明：
+
+```ts
+@Roles(['admin', 'developer'])
 ```
 
-## Deployment
+[RolesGuard](./src/auth/roles.guard.ts) 用 `getAllAndOverride()` 按“方法、类”的顺序查找规则，所以方法上的声明优先。数组表示具有任意一个允许角色即可访问，没有角色声明的路由仍需通过认证。
 
-When you're ready to deploy your NestJS application to production, there are some key steps you can take to ensure it runs as efficiently as possible. Check out the [deployment documentation](https://docs.nestjs.com/deployment) for more information.
+`@Public()` 写入另一份元数据。`AuthGuard` 检查到公开标记后跳过认证；此时 `RolesGuard` 因公开路由没有角色要求而放行。公开标记本身不会注册 Guard。
 
-If you are looking for a cloud-based platform to deploy your NestJS application, check out [Mau](https://mau.nestjs.com), our official platform for deploying NestJS applications on AWS. Mau makes deployment straightforward and fast, requiring just a few simple steps:
+### 让状态变化保持自洽
 
-```bash
-$ pnpm install -g @nestjs/mau
-$ mau deploy
+[AgentsService](./src/agents/agents.service.ts) 用递增 `nextId` 创建 ID，而不是用数组长度。删除中间记录再创建，也不会与已有 ID 冲突。不存在的 Agent 统一抛出 `NotFoundException`，交给 Nest 转成 HTTP 404。
+
+## 请求执行流程
+
+```mermaid
+flowchart TD
+    A[请求 /agents] --> B[AuthGuard 读取 Public 元数据]
+    B -->|公开路由| D[RolesGuard]
+    B -->|受保护路由| C[AuthService 查询演示 Token]
+    C -->|有效 身份写入 request.user| D
+    C -->|无效| U[401]
+    D -->|满足角色或无角色限制| E[AgentsController]
+    D -->|角色不符| F[403]
+    E --> G[AgentsService 内存目录]
 ```
 
-With Mau, you can deploy your application in just a few clicks, allowing you to focus on building features rather than managing infrastructure.
+## 如何运行
 
-## Observability
-
-In production applications, observability is essential for understanding how your system behaves, detecting issues early, and maintaining reliable performance.
-
-[NestJS Observe](https://observe.nestjs.com) automatically instruments your NestJS application, giving you deep visibility into your system with minimal setup:
-
-- **Distributed tracing:** Follow requests across services and understand how they flow through your system.
-- **Waterfall analysis:** Visualize request execution and identify slow operations, bottlenecks, and unexpected delays.
-- **Performance analysis:** Analyze application performance in real time and quickly pinpoint areas that need optimization.
-- **Metrics:** Track key application and infrastructure metrics to understand system health and performance trends.
-- **Logging:** Centralize and correlate logs with traces and other telemetry to make debugging easier.
-- **Error tracking:** Detect errors quickly and investigate their root causes with the surrounding context.
-- **SLA monitoring:** Track service-level objectives and identify when your application is approaching or exceeding defined thresholds.
-- **Alarms and alerts:** Set up alerts for critical errors, performance degradation, SLA violations, and other anomalies so your team can react quickly.
-
-To add it to this project, run this and approve the code it prints at [observe.nestjs.com/link](https://observe.nestjs.com/link) - signing up for free if you have no account:
+建议使用 Node.js 24、pnpm 12；本次审查环境为 Node.js 24.5.0、pnpm 12.3.4。项目没有 `engines` 固定版本，其他环境需要同时满足 Nest、Vite 和 Vitest 的要求。依赖声明 Nest `^12.0.1`、TypeScript `^6.0.2`，当前锁文件及安装结果为 Nest 12.3.2、TypeScript 6.0.3。
 
 ```bash
-$ npx @nestjs/observe link
+cd nestjs-study-5
+pnpm install --frozen-lockfile
+pnpm start:dev
 ```
 
-It installs `@nestjs/observe`, wires it into `AppModule` and `main.ts`, and writes the app key and secret into `.env`, which every `nest start` script (`start`, `start:dev`, `start:debug`) then loads. In production, set `OBSERVE_APP_KEY` and `OBSERVE_APP_SECRET` in the environment instead.
-
-Or do it by hand:
+默认端口 3000，可用 `PORT=3005 pnpm start:dev` 修改；没有必填环境变量、数据库或外部 API。每个 Study 独立启动，注意端口占用。
 
 ```bash
-$ pnpm install @nestjs/observe
+pnpm build
+pnpm exec tsc --noEmit
+pnpm lint
+pnpm test
+pnpm test:e2e
+pnpm start:prod
 ```
 
-Then follow the [setup guide](https://docs.nestjs.com/observability/sdk) - it takes a single import and an app key.
+`test:e2e` 会先构建，再导入 `dist` 中的应用进行真实 HTTP 验证；`start:prod` 需要先执行 `build`。`type: module` 与 NodeNext 配置要求源码的相对运行时导入保留 `.js` 扩展名。
 
-The free plan needs no payment details and covers 300,000 events a month. You can also browse the [live demo](https://www.observe-demo.nestjs.com/dashboard) first - the whole dashboard over a busy service's data, with nothing to install.
+## 如何验证
 
-## Resources
+先在新启动的应用中执行，`curl -i` 可以看到状态码：
 
-Check out a few resources that may come in handy when working with NestJS:
+```bash
+# 200：匿名公开访问
+curl -i http://localhost:3000/agents/public
+# 401：缺少身份
+curl -i http://localhost:3000/agents
+# 200：viewer 查询
+curl -i http://localhost:3000/agents -H 'Authorization: Bearer demo-viewer'
+# 403：viewer 不能创建
+curl -i -X POST http://localhost:3000/agents -H 'Authorization: Bearer demo-viewer'
+# 201：developer 创建，响应 id 初次为 3
+curl -i -X POST http://localhost:3000/agents -H 'Authorization: Bearer demo-developer'
+# 403：developer 不能删除
+curl -i -X DELETE http://localhost:3000/agents/3 -H 'Authorization: Bearer demo-developer'
+# 200：管理员删除刚创建的记录
+curl -i -X DELETE http://localhost:3000/agents/3 -H 'Authorization: Bearer demo-admin'
+# 404：记录已删除
+curl -i http://localhost:3000/agents/3 -H 'Authorization: Bearer demo-admin'
+```
 
-- Visit the [NestJS Documentation](https://docs.nestjs.com) to learn more about the framework.
-- For questions and support, please visit our [Discord channel](https://discord.gg/G7Qnnhy).
-- To dive deeper and get more hands-on experience, check out our official video [courses](https://courses.nestjs.com/).
-- Deploy your application to AWS with the help of [NestJS Mau](https://mau.nestjs.com) in just a few clicks.
-- Auto-instrument your application with [NestJS Observe](https://observe.nestjs.com). Distributed tracing, metrics, and logging made easy. Error tracking and performance monitoring for your NestJS applications.
-- Visualize your application graph and interact with the NestJS application in real-time using [NestJS Devtools](https://devtools.nestjs.com).
-- Need help with your project (part-time to full-time)? Check out our official [enterprise support](https://enterprise.nestjs.com).
-- To stay in the loop and get updates, follow us on [X](https://x.com/nestframework) and [LinkedIn](https://linkedin.com/company/nestjs).
-- Looking for a job, or have a job to offer? Check out our official [Jobs board](https://jobs.nestjs.com).
+已有状态会影响 ID，重复操作时应使用创建响应中的实际 ID。自动化测试另外覆盖了错误 Token 格式和删除后 ID 不重复。
 
-## Support
+## 推荐阅读顺序
 
-Nest is an MIT-licensed open source project. It can grow thanks to the sponsors and support by the amazing backers. If you'd like to join them, please [read more here](https://docs.nestjs.com/support).
+1. [app.module.ts](./src/app.module.ts) → [agents.module.ts](./src/agents/agents.module.ts)：先确认哪些模块真正生效。
+2. [agents.controller.ts](./src/agents/agents.controller.ts)：把每条路由映射成权限表。
+3. [auth.guard.ts](./src/auth/auth.guard.ts) → [auth.service.ts](./src/auth/auth.service.ts)：跟踪 Token 到用户的来源。
+4. [roles.decorator.ts](./src/auth/roles.decorator.ts) → [roles.guard.ts](./src/auth/roles.guard.ts)：观察元数据如何变为拒绝或放行。
+5. [agents.service.ts](./src/agents/agents.service.ts) → [e2e 测试](./test/app.e2e-spec.ts)：确认通过 Guard 后才发生状态变化。
 
-## Stay in touch
+## 思考与练习
 
-- Author - [Kamil Myśliwiec](https://twitter.com/kammysliwiec)
-- Website - [https://nestjs.com](https://nestjs.com/)
-- Twitter - [@nestframework](https://twitter.com/nestframework)
+1. 将创建权限改为仅管理员可用，重新验证 developer 的响应。
+2. 为控制器声明默认角色，再为一个方法单独声明角色，观察覆盖顺序。
+3. 给公开路由增加 `@Roles(['admin'])`，观察两个 Guard 如何组合，并解释为何公开不一定等于免授权。
+4. 添加一个只读审核角色，在服务端 Token 映射与授权规则中完成接线。
 
-## License
+## 本章总结
 
-Nest is [MIT licensed](https://github.com/nestjs/nest/blob/master/LICENSE).
+Guard 的价值在于把身份与访问控制放到统一入口；装饰器负责声明，`Reflector` 负责读取，Service 负责业务。本章重点是认证与授权的先后关系。下一章观察请求进入业务后的 Interceptor；Study 7 会进一步将可信用户上下文封装成参数装饰器，并加入资源归属检查。
+
+参考：[官方 Guards](https://docs.nestjs.com/guards)、[中文守卫文档](https://docs.nestjs.cn/guards)。

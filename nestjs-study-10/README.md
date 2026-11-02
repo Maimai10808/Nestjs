@@ -1,132 +1,163 @@
-<p align="center">
-  <a href="http://nestjs.com/" target="blank"><img src="https://nestjs.com/img/logo-small.svg" width="120" alt="Nest Logo" /></a>
-</p>
+# Study 10：用动态模块配置 AI 模型实现
 
-[circleci-image]: https://img.shields.io/circleci/build/github/nestjs/nest/master?token=abc123def456
-[circleci-url]: https://circleci.com/gh/nestjs/nest
+## 项目介绍
 
-  <p align="center">A progressive <a href="http://nodejs.org" target="_blank">Node.js</a> framework for building efficient and scalable server-side applications.</p>
-    <p align="center">
-<a href="https://www.npmjs.com/~nestjscore" target="_blank"><img src="https://img.shields.io/npm/v/@nestjs/core.svg" alt="NPM Version" /></a>
-<a href="https://www.npmjs.com/~nestjscore" target="_blank"><img src="https://img.shields.io/npm/l/@nestjs/core.svg" alt="Package License" /></a>
-<a href="https://www.npmjs.com/~nestjscore" target="_blank"><img src="https://img.shields.io/npm/dm/@nestjs/common.svg" alt="NPM Downloads" /></a>
-<a href="https://circleci.com/gh/nestjs/nest" target="_blank"><img src="https://img.shields.io/circleci/build/github/nestjs/nest/master" alt="CircleCI" /></a>
-<a href="https://discord.gg/G7Qnnhy" target="_blank"><img src="https://img.shields.io/badge/discord-online-brightgreen.svg" alt="Discord"/></a>
-<a href="https://opencollective.com/nest#backer" target="_blank"><img src="https://opencollective.com/nest/backers/badge.svg" alt="Backers on Open Collective" /></a>
-<a href="https://opencollective.com/nest#sponsor" target="_blank"><img src="https://opencollective.com/nest/sponsors/badge.svg" alt="Sponsors on Open Collective" /></a>
-  <a href="https://paypal.me/kamilmysliwiec" target="_blank"><img src="https://img.shields.io/badge/Donate-PayPal-ff3f59.svg" alt="Donate us"/></a>
-    <a href="https://opencollective.com/nest#sponsor"  target="_blank"><img src="https://img.shields.io/badge/Support%20us-Open%20Collective-41B883.svg" alt="Support us"></a>
-  <a href="https://twitter.com/nestframework" target="_blank"><img src="https://img.shields.io/twitter/follow/nestframework.svg?style=social&label=Follow" alt="Follow us on Twitter"></a>
-</p>
-  <!--[![Backers on Open Collective](https://opencollective.com/nest/backers/badge.svg)](https://opencollective.com/nest#backer)
-  [![Sponsors on Open Collective](https://opencollective.com/nest/sponsors/badge.svg)](https://opencollective.com/nest#sponsor)-->
+同一套 AI 业务代码，如何在启动时选择 OpenAI 或 Claude，而不让 Controller 到处判断供应商？本章用 `AiModule.register(options)` 返回不同的模块定义，把选择集中在应用组装阶段。
 
-## Description
+HTTP 接口可以查看当前配置，并让选中的模型返回模拟文本。所有模型均为本地 Mock，不访问 OpenAI 或 Anthropic，也不需要 API Key。
 
-[Nest](https://github.com/nestjs/nest) framework TypeScript starter repository.
+## 学习目标
 
-## Project setup
+- 理解动态模块是“根据参数构造模块元数据”，不是收到每个请求后动态换模块。
+- 区分配置 Token `AI_OPTIONS` 与实现 Token `AI_MODEL`：一个提供参数，一个提供可调用对象。
+- 理解 `useValue` 如何注入配置、`useClass` 如何让相同 Token 对应不同实现。
+- 追踪模块配置从 `AppModule` 到 `AiService` 再到 HTTP 响应的过程。
 
-```bash
-$ pnpm install
+## 业务场景
+
+AI 应用可能在不同环境中使用不同模型。调用方希望始终执行 `generate(prompt)`，而不必知道供应商的类名。本章把模型选择交给应用启动时的配置，使 HTTP 业务保持稳定。
+
+配置中的 `timeout` 和 `maxRetries` **只演示配置传递和读取**，当前 Mock 没有实现超时控制、失败重试或真实网络请求。不能根据响应中出现这些数值，就认为这些运行策略已经生效。
+
+## 项目结构
+
+```text
+src/
+├── main.ts
+├── app.module.ts                       # 注册一次 AiModule 并传入配置
+├── app.controller.ts                   # 未注册的脚手架文件
+├── app.controller.spec.ts
+├── app.service.ts
+└── ai/
+    ├── ai.module.ts                    # register() 构造 DynamicModule
+    ├── ai.controller.ts                # /ai/config、/ai/generate
+    ├── ai.service.ts                   # 同时注入配置与模型
+    ├── constants/ai.tokens.ts          # 两个 Symbol Token
+    ├── interfaces/
+    │   ├── ai-options.interface.ts     # 模块配置的类型约束
+    │   └── ai-model.interface.ts       # 模型能力约定
+    └── models/
+        ├── openai.service.ts           # OpenAI 文本 Mock
+        └── claude.service.ts           # Claude 文本 Mock
+ test/app.e2e-spec.ts                   # 两种注册配置的真实 HTTP 验证
 ```
 
-## Compile and run the project
+## 核心知识讲解
 
-```bash
-# development
-$ pnpm run start
+### 先理解模块的使用者
 
-# watch mode
-$ pnpm run start:dev
+[app.module.ts](./src/app.module.ts) 中的入口配置：
 
-# production mode
-$ pnpm run start:prod
+```ts
+AiModule.register({
+  provider: 'openai',
+  timeout: 30000,
+  maxRetries: 3,
+})
 ```
 
-## Run tests
+`register()` 在组装模块时执行。返回值仍然包含 Nest 熟悉的 `module`、`controllers`、`providers`、`exports`，只是这些内容现在可以由参数决定。
 
-```bash
-# unit tests
-$ pnpm run test
+### 把配置和实现分别放进容器
 
-# e2e tests
-$ pnpm run test:e2e
+[ai.module.ts](./src/ai/ai.module.ts) 中，`provider` 决定 `modelClass`，再注册：
 
-# test coverage
-$ pnpm run test:cov
+```ts
+{ provide: AI_OPTIONS, useValue: options },
+{ provide: AI_MODEL, useClass: modelClass },
 ```
 
-## Deployment
+第一项直接保存传入的配置对象；第二项让 Nest 创建相应模型实例。`AiService` 只注入 `AI_MODEL`，因此不必在每次生成时重复判断 `openai` 或 `claude`。
 
-When you're ready to deploy your NestJS application to production, there are some key steps you can take to ensure it runs as efficiently as possible. Check out the [deployment documentation](https://docs.nestjs.com/deployment) for more information.
+`AiModel` 接口约定 `getName()` 与 `generate()`，帮助 TypeScript 检查两种实现是否具备同样能力；接口本身不能充当运行时注入标识，所以仍要使用 Symbol Token。
 
-If you are looking for a cloud-based platform to deploy your NestJS application, check out [Mau](https://mau.nestjs.com), our official platform for deploying NestJS applications on AWS. Mau makes deployment straightforward and fast, requiring just a few simple steps:
+### exports 不等于 HTTP 路由
 
-```bash
-$ pnpm install -g @nestjs/mau
-$ mau deploy
+模块导出 `AiService`、`AI_MODEL` 和 `AI_OPTIONS`，表示导入该模块的其他模块可以依赖它们。路由来自 `controllers: [AiController]` 的注册，两者承担不同职责。
+
+本章在一个应用中只注册一套 AI HTTP 接口。不要直接同时引入两次带相同 Controller 路由的动态模块，再期待 Nest 自动为它们区分 URL；多实例路由命名属于后续设计问题。
+
+### 输入检查发生在哪里
+
+[ai.controller.ts](./src/ai/ai.controller.ts) 将 `prompt` 当作 `unknown`，检查它是非空字符串后才调用 Service。TypeScript 参数注解无法保证客户端 JSON 合法；这里使用简单检查，不把接口类型误当成运行时 DTO 验证。
+
+## 核心执行流程
+
+```mermaid
+flowchart TD
+  A[AppModule 传入 options] --> B[AiModule.register]
+  B --> C[AI_OPTIONS 保存配置]
+  B --> D[AI_MODEL 选择 OpenAiService 或 ClaudeService]
+  C --> E[AiService]
+  D --> E
+  F[POST /ai/generate] --> G[AiController 校验 prompt]
+  G --> E
+  E --> H[所选模型返回 Mock 文本]
 ```
 
-With Mau, you can deploy your application in just a few clicks, allowing you to focus on building features rather than managing infrastructure.
+## 如何运行
 
-## Observability
-
-In production applications, observability is essential for understanding how your system behaves, detecting issues early, and maintaining reliable performance.
-
-[NestJS Observe](https://observe.nestjs.com) automatically instruments your NestJS application, giving you deep visibility into your system with minimal setup:
-
-- **Distributed tracing:** Follow requests across services and understand how they flow through your system.
-- **Waterfall analysis:** Visualize request execution and identify slow operations, bottlenecks, and unexpected delays.
-- **Performance analysis:** Analyze application performance in real time and quickly pinpoint areas that need optimization.
-- **Metrics:** Track key application and infrastructure metrics to understand system health and performance trends.
-- **Logging:** Centralize and correlate logs with traces and other telemetry to make debugging easier.
-- **Error tracking:** Detect errors quickly and investigate their root causes with the surrounding context.
-- **SLA monitoring:** Track service-level objectives and identify when your application is approaching or exceeding defined thresholds.
-- **Alarms and alerts:** Set up alerts for critical errors, performance degradation, SLA violations, and other anomalies so your team can react quickly.
-
-To add it to this project, run this and approve the code it prints at [observe.nestjs.com/link](https://observe.nestjs.com/link) - signing up for free if you have no account:
+使用 Node.js 22（22.12 及以上）或 24+、pnpm。审查使用 Node.js 24.5.0、pnpm 12.3.4。`package.json` 声明 Nest `^12.0.1`、TypeScript `^6.0.2`；当前锁文件安装为 Nest 12.3.2、TypeScript 6.0.3。无需 Redis、数据库或模型账号。
 
 ```bash
-$ npx @nestjs/observe link
+cd nestjs-study-10
+pnpm install --frozen-lockfile
+pnpm build
+pnpm exec tsc --noEmit
+pnpm start:dev
+# 构建后也可以直接启动；默认 PORT=3000
+PORT=3010 pnpm start:prod
 ```
 
-It installs `@nestjs/observe`, wires it into `AppModule` and `main.ts`, and writes the app key and secret into `.env`, which every `nest start` script (`start`, `start:dev`, `start:debug`) then loads. In production, set `OBSERVE_APP_KEY` and `OBSERVE_APP_SECRET` in the environment instead.
+同时启动多个 Study 时设置不同 `PORT`，并调整 curl 地址。本章不读取自定义 AI 环境变量，模型选择写在 `app.module.ts` 中。
 
-Or do it by hand:
+## 如何验证
+
+默认注册 OpenAI：
 
 ```bash
-$ pnpm install @nestjs/observe
+# 200：model=OpenAI、timeout=30000、maxRetries=3
+curl -i http://localhost:3000/ai/config
+# 201：provider=OpenAI，result 为本地模拟文本
+curl -i -X POST http://localhost:3000/ai/generate \
+  -H 'Content-Type: application/json' \
+  -d '{"prompt":"解释 NestJS 动态模块"}'
+# 400：请求没有合法 prompt
+curl -i -X POST http://localhost:3000/ai/generate \
+  -H 'Content-Type: application/json' -d '{"prompt":42}'
+curl -i -X POST http://localhost:3000/ai/generate \
+  -H 'Content-Type: application/json' -d '{"prompt":"   "}'
 ```
 
-Then follow the [setup guide](https://docs.nestjs.com/observability/sdk) - it takes a single import and an app key.
+把 `app.module.ts` 的 `provider` 改为 `'claude'` 并重新启动后，重复前两个请求：配置中的 `model` 变为 `Claude`，生成结果以 `[Claude 模拟响应]` 开头。**不改 Controller 和 Service**，就能观察动态注册带来的实现替换；实验完成后可恢复默认配置。
 
-The free plan needs no payment details and covers 300,000 events a month. You can also browse the [live demo](https://www.observe-demo.nestjs.com/dashboard) first - the whole dashboard over a busy service's data, with nothing to install.
+```bash
+pnpm test
+pnpm test:e2e
+pnpm lint
+```
 
-## Resources
+`test:e2e` 先构建，再导入 `dist` 模块；既验证实际应用的默认注册，也单独创建 Claude 配置的模块测试 HTTP 行为，还验证非法 prompt。这些测试只覆盖 Mock，不是供应商 API 的集成测试。
 
-Check out a few resources that may come in handy when working with NestJS:
+## 推荐阅读顺序
 
-- Visit the [NestJS Documentation](https://docs.nestjs.com) to learn more about the framework.
-- For questions and support, please visit our [Discord channel](https://discord.gg/G7Qnnhy).
-- To dive deeper and get more hands-on experience, check out our official video [courses](https://courses.nestjs.com/).
-- Deploy your application to AWS with the help of [NestJS Mau](https://mau.nestjs.com) in just a few clicks.
-- Auto-instrument your application with [NestJS Observe](https://observe.nestjs.com). Distributed tracing, metrics, and logging made easy. Error tracking and performance monitoring for your NestJS applications.
-- Visualize your application graph and interact with the NestJS application in real-time using [NestJS Devtools](https://devtools.nestjs.com).
-- Need help with your project (part-time to full-time)? Check out our official [enterprise support](https://enterprise.nestjs.com).
-- To stay in the loop and get updates, follow us on [X](https://x.com/nestframework) and [LinkedIn](https://linkedin.com/company/nestjs).
-- Looking for a job, or have a job to offer? Check out our official [Jobs board](https://jobs.nestjs.com).
+1. [app.module.ts](./src/app.module.ts)：先从调用方看本章希望提供怎样的配置接口。
+2. [ai-options.interface.ts](./src/ai/interfaces/ai-options.interface.ts) 与 [ai-model.interface.ts](./src/ai/interfaces/ai-model.interface.ts)：区分“配置数据”和“模型能力”。
+3. [ai.tokens.ts](./src/ai/constants/ai.tokens.ts) → [ai.module.ts](./src/ai/ai.module.ts)：把类型约定映射到运行时注册规则。
+4. [ai.service.ts](./src/ai/ai.service.ts) → [models/](./src/ai/models/)：确认业务如何只依赖统一能力。
+5. [ai.controller.ts](./src/ai/ai.controller.ts) → [端到端测试](./test/app.e2e-spec.ts)：最后看请求和配置切换如何得到验证。
 
-## Support
+## 思考与练习
 
-Nest is an MIT-licensed open source project. It can grow thanks to the sponsors and support by the amazing backers. If you'd like to join them, please [read more here](https://docs.nestjs.com/support).
+1. 添加一个完全本地的第三种模型实现，需要修改哪些配置类型和注册分支？哪些调用代码应保持稳定？
+2. 修改 `timeout` 数值，观察它仅出现在配置响应中；如果实现真正超时控制，应把逻辑放在哪一层？
+3. 将动态模块中的 `useClass` 改为基于依赖的 `useFactory`，思考何时这种写法才有必要。
+4. 为不受 TypeScript 约束的外部配置增加运行时校验，避免非法供应商值意外走到另一种实现。
 
-## Stay in touch
+## 本章总结
 
-- Author - [Kamil Myśliwiec](https://twitter.com/kammysliwiec)
-- Website - [https://nestjs.com](https://nestjs.com/)
-- Twitter - [@nestframework](https://twitter.com/nestframework)
+Study 8 解决“如何注册不同 Provider”，本章进一步解决“如何把一组相关注册封装成可配置模块”。重点是读取 `register()` 的返回值，并追踪两个 Token；异步配置、真正的重试和网络调用仍是后续内容。
 
-## License
+下一章会研究同一注册规则下实例的生命周期与共享范围。动态模块决定如何组装，Scope 决定什么时候创建和复用。
 
-Nest is [MIT licensed](https://github.com/nestjs/nest/blob/master/LICENSE).
+参考：[动态模块](https://docs.nestjs.com/fundamentals/dynamic-modules)、[自定义 Provider](https://docs.nestjs.com/fundamentals/custom-providers)。
