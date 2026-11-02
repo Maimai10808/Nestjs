@@ -1,41 +1,21 @@
-import {
-  Inject,
-  Injectable,
-  Scope,
-} from '@nestjs/common';
-
+import { BadRequestException, Inject, Injectable, Scope } from '@nestjs/common';
 import { REQUEST } from '@nestjs/core';
-
 import { randomUUID } from 'node:crypto';
+import type { TenantContext } from './tenant-context.strategy.js';
 
-interface TenantContext {
-  tenantId: string;
-}
-
-@Injectable({
-  scope: Scope.REQUEST,
-  durable: true,
-})
+@Injectable({ scope: Scope.REQUEST, durable: true })
 export class TenantService {
-  // 用于观察是否创建了新实例
   readonly instanceId = randomUUID();
 
-  constructor(
-    @Inject(REQUEST)
-    private readonly context: TenantContext,
-  ) {
-    console.log(
-      '创建 TenantService:',
-      this.instanceId,
-      '企业:',
-      this.context.tenantId,
-    );
-  }
+  constructor(@Inject(REQUEST) private readonly context: TenantContext) {}
 
   getInfo() {
-    return {
-      tenantId: this.context.tenantId,
-      instanceId: this.instanceId,
-    };
+    if (!this.context.tenantId) {
+      throw new BadRequestException(
+        '本示例仅支持 x-tenant-id: tenant-a 或 tenant-b',
+      );
+    }
+
+    return { tenantId: this.context.tenantId, instanceId: this.instanceId };
   }
 }

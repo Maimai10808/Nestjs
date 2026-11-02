@@ -4,41 +4,36 @@ import {
   type ContextIdStrategy,
   type HostComponentInfo,
 } from '@nestjs/core';
-
 import type { Request } from 'express';
 
-// 保存每个企业对应的 DI 上下文 ID
-const tenantContexts = new Map<string, ContextId>();
+export interface TenantContext {
+  tenantId: 'tenant-a' | 'tenant-b' | null;
+}
 
+// 这两个公开标签只用于观察 DI 实例分组，不代表已认证的企业身份。
 export class TenantContextStrategy implements ContextIdStrategy {
+  private readonly tenantContexts = new Map<string, ContextId>();
+
   attach(contextId: ContextId, request: Request) {
-    // 从请求中获取企业 ID
-    const tenantId = request.headers['x-tenant-id'];
+    const header = request.headers['x-tenant-id'];
+    const tenantId = header === 'tenant-a' || header === 'tenant-b' ? header : null;
+    const payload: TenantContext = { tenantId };
 
-    if (typeof tenantId !== 'string' || !tenantId) {
-      // 学习示例：没有企业 ID 时不复用持久子树
-      return () => contextId;
+    if (!tenantId) {
+      // 即使没有合法标签也注入明确 payload，让 Service 返回 400。
+      return { resolve: () => contextId, payload };
     }
 
-    // 查找企业对应的上下文
-    let tenantContextId = tenantContexts.get(tenantId);
-
+    let tenantContextId = this.tenantContexts.get(tenantId);
     if (!tenantContextId) {
-      // 第一次出现这个企业，创建新的上下文
       tenantContextId = ContextIdFactory.create();
-
-      tenantContexts.set(tenantId, tenantContextId);
+      this.tenantContexts.set(tenantId, tenantContextId);
     }
 
-    // 为持久依赖树返回企业专属上下文
     return {
       resolve: (info: HostComponentInfo) =>
         info.isTreeDurable ? tenantContextId : contextId,
-
-      // 为持久子树提供稳定的企业上下文
-      payload: {
-        tenantId,
-      },
+      payload,
     };
   }
 }

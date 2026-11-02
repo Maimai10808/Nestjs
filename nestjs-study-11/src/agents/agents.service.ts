@@ -21,7 +21,7 @@ export class AgentsService {
   }
 
   run(prompt: string) {
-    this.logger.log(`执行 Agent：${prompt}`);
+    this.logger.log('执行 Agent 请求');
 
     return {
       prompt,
