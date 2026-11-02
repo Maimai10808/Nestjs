@@ -1,6 +1,6 @@
-import { Injectable, NotFoundException } from '@nestjs/common';
+import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
 
-interface Product {
+export interface Product {
   id: number;
   name: string;
   price: number;
@@ -38,10 +38,13 @@ export class ProductsService {
     return product;
   }
 
-  create(name: string, price: number): Product {
+  create(name: unknown, price: unknown): Product {
+    if (typeof name !== 'string' || !name.trim() || typeof price !== 'number' || !Number.isFinite(price) || price < 0) {
+      throw new BadRequestException('商品名称不能为空，价格必须是非负有限数字');
+    }
     const product: Product = {
       id: this.products.length + 1,
-      name,
+      name: name.trim(),
       price,
       stock: 0,
     };

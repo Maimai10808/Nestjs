@@ -30,13 +30,15 @@ export class ExceptionLabService {
   }
 
   // 资源冲突：409
-  create(name: string) {
-    if (!name?.trim()) {
+  create(name: unknown) {
+    if (typeof name !== 'string' || !name.trim()) {
       throw new BadRequestException('Agent 名称不能为空');
     }
 
+    const normalizedName = name.trim();
+
     const exists = this.agents.some(
-      (agent) => agent.name === name,
+      (agent) => agent.name === normalizedName,
     );
 
     if (exists) {
@@ -45,7 +47,7 @@ export class ExceptionLabService {
 
     const agent = {
       id: Math.max(0, ...this.agents.map((item) => item.id)) + 1,
-      name,
+      name: normalizedName,
       status: 'active',
     };
 

@@ -30,8 +30,9 @@ export class ProductsController {
   // POST /products
   @Post()
   create(
-    @Body() body: { name: string; price: number },
+    @Body('name') name: unknown,
+    @Body('price') price: unknown,
   ) {
-    return this.productsService.create(body.name, body.price);
+    return this.productsService.create(name, price);
   }
 }

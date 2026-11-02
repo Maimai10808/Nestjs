@@ -9,6 +9,7 @@ import {
 } from '@nestjs/common';
 
 import { HttpAdapterHost } from '@nestjs/core';
+import type { Request, Response } from 'express';
 
 @Injectable()
 @Catch()
@@ -29,9 +30,9 @@ export class AllExceptionsFilter implements ExceptionFilter {
 
     const ctx = host.switchToHttp();
 
-    const request = ctx.getRequest();
+    const request = ctx.getRequest<Request>();
 
-    const response = ctx.getResponse();
+    const response = ctx.getResponse<Response>();
 
     // 判断是不是 NestJS HTTP 异常
     const isHttpException =
