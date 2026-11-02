@@ -14,8 +14,8 @@ export class AgentsController {
 
   @Post('generate')
   generate(
-    @Body('model') model: string,
-    @Body('prompt') prompt: string,
+    @Body('model') model: unknown,
+    @Body('prompt') prompt: unknown,
   ) {
     return this.agentsService.generate(model, prompt);
   }
