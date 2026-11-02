@@ -14,13 +14,15 @@ import { AgentsService } from './agents.service.js';
 
 import { Roles } from '../common/decorators/roles.decorator.js';
 
+import { MockAuthGuard } from '../common/guards/mock-auth.guard.js';
+
 import { RolesGuard } from '../common/guards/roles.guard.js';
 
 import { ContextInterceptor } from '../common/interceptors/context.interceptor.js';
 
 @Controller('agents')
-@Roles(['user'])
-@UseGuards(RolesGuard)
+@Roles(['user', 'admin'])
+@UseGuards(MockAuthGuard, RolesGuard)
 @UseInterceptors(ContextInterceptor)
 export class AgentsController {
   constructor(

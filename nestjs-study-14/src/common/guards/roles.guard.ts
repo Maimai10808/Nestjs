@@ -7,19 +7,8 @@ import {
 
 import { Reflector } from '@nestjs/core';
 
-import type { Request } from 'express';
-
-import {
-  Roles,
-  type Role,
-} from '../decorators/roles.decorator.js';
-
-type DemoRequest = Request & {
-  user?: {
-    id: number;
-    role: Role;
-  };
-};
+import { Roles } from '../decorators/roles.decorator.js';
+import type { DemoRequest } from './mock-auth.guard.js';
 
 @Injectable()
 export class RolesGuard implements CanActivate {

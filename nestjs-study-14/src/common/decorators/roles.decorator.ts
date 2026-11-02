@@ -1,11 +1,6 @@
-import { SetMetadata } from '@nestjs/common';
+import { Reflector } from '@nestjs/core';
 
-// 元数据 Key
+export type Role = 'user' | 'admin';
 
-export const ROLES_KEY = 'roles';
-
-// 自定义角色装饰器
-
-export const Roles = (...roles: string[]) =>
-
-  SetMetadata(ROLES_KEY, roles);
+// 装饰器本身携带元数据 Key，Guard 使用同一引用读取角色。
+export const Roles = Reflector.createDecorator<Role[]>();

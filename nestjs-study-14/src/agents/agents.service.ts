@@ -1,4 +1,4 @@
-import { Injectable, NotFoundException } from '@nestjs/common';
+import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
 
 export interface Agent {
   id: number;
@@ -31,9 +31,13 @@ export class AgentsService {
   }
 
   create(name: string): Agent {
+    if (typeof name !== 'string' || !name.trim()) {
+      throw new BadRequestException('Agent 名称不能为空');
+    }
+
     const agent: Agent = {
       id: Math.max(0, ...this.agents.map((item) => item.id)) + 1,
-      name,
+      name: name.trim(),
       description: '新创建的 Agent',
     };
 
