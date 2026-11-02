@@ -11,7 +11,7 @@ import { randomUUID } from 'node:crypto';
 
 import { DatabaseService } from '../infrastructure/database.service.js';
 
-interface AgentTask {
+export interface AgentTask {
   id: string;
   status: 'running' | 'completed';
 }

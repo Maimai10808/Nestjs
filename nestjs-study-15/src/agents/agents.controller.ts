@@ -6,7 +6,7 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 
-import { AgentsService } from './agents.service.js';
+import { AgentsService, type AgentTask } from './agents.service.js';
 
 @Controller('agents')
 export class AgentsController {
@@ -15,12 +15,12 @@ export class AgentsController {
   ) {}
 
   @Post('tasks')
-  createTask() {
+  createTask(): AgentTask {
     return this.agentsService.createTask();
   }
 
   @Get('tasks/:id')
-  getTask(@Param('id') id: string) {
+  getTask(@Param('id') id: string): AgentTask {
     const task = this.agentsService.findTask(id);
 
     if (!task) {

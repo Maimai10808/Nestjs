@@ -1,12 +1,12 @@
 import {
   Injectable,
   OnModuleInit,
-  OnModuleDestroy,
+  OnApplicationShutdown,
 } from '@nestjs/common';
 
 @Injectable()
 export class DatabaseService
-  implements OnModuleInit, OnModuleDestroy
+  implements OnModuleInit, OnApplicationShutdown
 {
   private connected = false;
 
@@ -25,7 +25,8 @@ export class DatabaseService
     console.log('[Database] 数据库连接成功');
   }
 
-  async onModuleDestroy(): Promise<void> {
+  // 所有 beforeApplicationShutdown 排空完成后才释放共享资源。
+  onApplicationShutdown(): void {
     console.log('[Database] 开始释放数据库资源');
 
     this.connected = false;
