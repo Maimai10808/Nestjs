@@ -1,6 +1,6 @@
 import { Injectable, NotFoundException } from '@nestjs/common';
 
-interface Agent {
+export interface Agent {
   id: string;
   name: string;
   description: string;
@@ -21,6 +21,8 @@ export class AgentsService {
     },
   ];
 
+  private nextId = 3;
+
   findAll(): Agent[] {
     return this.agents;
   }
@@ -37,7 +39,7 @@ export class AgentsService {
 
   create(): Agent {
     const agent: Agent = {
-      id: String(this.agents.length + 1),
+      id: String(this.nextId++),
       name: 'New Agent',
       description: '新创建的 Agent',
     };
@@ -48,9 +50,7 @@ export class AgentsService {
   }
 
   remove(id: string): { deleted: boolean } {
-    const index = this.agents.findIndex(
-      (agent) => agent.id === id,
-    );
+    const index = this.agents.findIndex((agent) => agent.id === id);
 
     if (index === -1) {
       throw new NotFoundException('Agent 不存在');
