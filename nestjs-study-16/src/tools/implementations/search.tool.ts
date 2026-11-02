@@ -9,13 +9,14 @@ import type {
 @Injectable()
 @AgentTool({
   name: 'search',
-  description: '搜索互联网信息',
+  description: '返回本地模拟搜索结果',
 })
 export class SearchTool implements IAgentTool {
   async execute(input: string): Promise<unknown> {
     return {
       tool: 'search',
       query: input,
+      mock: true,
       results: [
         {
           title: 'NestJS Documentation',

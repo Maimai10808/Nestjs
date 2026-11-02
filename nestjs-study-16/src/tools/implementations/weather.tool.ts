@@ -9,7 +9,7 @@ import type {
 @Injectable()
 @AgentTool({
   name: 'weather',
-  description: '查询城市天气',
+  description: '返回本地模拟天气',
 })
 export class WeatherTool implements IAgentTool {
   async execute(input: string): Promise<unknown> {

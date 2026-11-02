@@ -20,7 +20,8 @@ export class CalculatorTool implements IAgentTool {
 
     if (
       parts.length !== 2 ||
-      parts.some((value) => !Number.isFinite(value))
+      parts.some((value) => !Number.isFinite(value)) ||
+      !Number.isFinite(parts[0] + parts[1])
     ) {
       throw new BadRequestException(
         '请输入两个数字，例如：10 20',

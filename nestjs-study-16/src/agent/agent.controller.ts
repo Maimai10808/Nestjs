@@ -1,4 +1,5 @@
 import {
+  BadRequestException,
   Body,
   Controller,
   Get,
@@ -6,37 +7,24 @@ import {
   Post,
 } from '@nestjs/common';
 
-import { IsString, IsNotEmpty } from 'class-validator';
-
 import { AgentService } from './agent.service.js';
-
-export class ExecuteToolDto {
-  @IsString()
-  @IsNotEmpty()
-  input: string;
-}
 
 @Controller('agent')
 export class AgentController {
-  constructor(
-    private readonly agentService: AgentService,
-  ) {}
+  constructor(private readonly agentService: AgentService) {}
 
-  // 查看所有已注册工具
   @Get('tools')
   getTools() {
     return this.agentService.getAvailableTools();
   }
 
-  // 执行指定工具
   @Post('tools/:name/execute')
-  executeTool(
-    @Param('name') name: string,
-    @Body() dto: ExecuteToolDto,
-  ) {
-    return this.agentService.executeTool(
-      name,
-      dto.input,
-    );
+  executeTool(@Param('name') name: string, @Body('input') input: unknown) {
+    // 本章聚焦工具发现；运行时显式校验，不依赖未安装的验证库。
+    if (typeof input !== 'string' || !input.trim()) {
+      throw new BadRequestException('input 必须是非空字符串');
+    }
+
+    return this.agentService.executeTool(name, input.trim());
   }
 }
