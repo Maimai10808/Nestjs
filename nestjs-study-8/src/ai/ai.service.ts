@@ -1,23 +1,11 @@
-import {
-  Injectable,
-  Inject,
-} from '@nestjs/common';
+import { Injectable, Inject, BadRequestException } from '@nestjs/common';
 
-import {
-  AI_MODEL,
-  AI_CONFIG,
-  LOGGER,
-} from './tokens/ai.tokens.js';
+import { AI_MODEL, AI_CONFIG, LOGGER } from './tokens/ai.tokens.js';
 
 import type { AIModel } from './interfaces/ai-model.interface.js';
+import type { AIConfig } from './interfaces/ai-config.interface.js';
 
 import { LoggerService } from '../common/logger/logger.service.js';
-
-interface AIConfig {
-  provider: 'openai' | 'anthropic';
-  maxTokens: number;
-  temperature: number;
-}
 
 @Injectable()
 export class AiService {
@@ -35,8 +23,12 @@ export class AiService {
     private readonly logger: LoggerService,
   ) {}
 
-  async chat(prompt: string) {
-    this.logger.log(`收到 AI 请求：${prompt}`);
+  async chat(prompt: unknown) {
+    if (typeof prompt !== 'string' || !prompt.trim() || prompt.length > 2000) {
+      throw new BadRequestException('prompt 必须是 1～2000 字符的非空字符串');
+    }
+    // 不把用户的原始 Prompt 写入日志。
+    this.logger.log('收到 AI 生成请求');
 
     const result = await this.model.generate(prompt);
 
