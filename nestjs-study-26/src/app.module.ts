@@ -1,10 +1,16 @@
 import { Module } from '@nestjs/common';
-import { AppController } from './app.controller.js';
-import { AppService } from './app.service.js';
+import { ScheduleModule } from '@nestjs/schedule';
+
+import { AgentsModule } from './agents/agents.module.js';
+import { SchedulesModule } from './schedules/schedules.module.js';
 
 @Module({
-  imports: [],
-  controllers: [AppController],
-  providers: [AppService],
+  imports: [
+    ScheduleModule.forRoot(),
+
+    AgentsModule,
+
+    SchedulesModule,
+  ],
 })
 export class AppModule {}
