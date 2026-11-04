@@ -1,0 +1,44 @@
+<section class="reports-page">
+
+  <h2>{{title}}</h2>
+
+  <p>
+    查看 AI Agent 自动生成的研究报告
+  </p>
+
+  <div class="report-grid">
+
+    {{#each reports}}
+
+      <article class="report-card">
+
+        <h3>{{this.title}}</h3>
+
+        <p>{{this.description}}</p>
+
+        <div class="report-meta">
+
+          <span>
+            Model: {{this.model}}
+          </span>
+
+          <span>
+            Status: {{this.status}}
+          </span>
+
+        </div>
+
+        <a
+          class="button"
+          href="/reports/{{this.id}}"
+        >
+          查看报告
+        </a>
+
+      </article>
+
+    {{/each}}
+
+  </div>
+
+</section>

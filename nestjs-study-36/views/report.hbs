@@ -1,0 +1,59 @@
+<article class="report-detail">
+
+  <div class="report-header">
+
+    <a href="/reports">
+      ← 返回报告列表
+    </a>
+
+    <h2>{{report.title}}</h2>
+
+    <p>{{report.description}}</p>
+
+    <div class="report-meta">
+
+      <span>
+        AI Model: {{report.model}}
+      </span>
+
+      <span>
+        Status: {{report.status}}
+      </span>
+
+      <span>
+        Created: {{report.createdAt}}
+      </span>
+
+    </div>
+
+  </div>
+
+  <section class="report-content">
+
+    <h3>研究内容</h3>
+
+    <pre>{{report.content}}</pre>
+
+  </section>
+
+  <div class="report-actions">
+
+    <a
+      class="button"
+      href="/reports/{{report.id}}/print"
+      target="_blank"
+      rel="noopener noreferrer"
+    >
+      打印报告
+    </a>
+
+    <a
+      class="button"
+      href="/reports/{{report.id}}/raw"
+    >
+      查看 JSON
+    </a>
+
+  </div>
+
+</article>
