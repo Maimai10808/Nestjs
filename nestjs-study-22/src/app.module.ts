@@ -3,7 +3,6 @@ import { CacheModule } from '@nestjs/cache-manager';
 
 import { AgentsModule } from './agents/agents.module.js';
 import { ModelsModule } from './models/models.module.js';
-import { CacheAdminModule } from './cache-admin/cache-admin.module.js';
 
 @Module({
   imports: [
@@ -17,7 +16,6 @@ import { CacheAdminModule } from './cache-admin/cache-admin.module.js';
 
     AgentsModule,
     ModelsModule,
-    CacheAdminModule,
   ],
 })
 export class AppModule {}

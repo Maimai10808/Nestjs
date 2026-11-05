@@ -1,6 +1,7 @@
 import {
   Injectable,
   NotFoundException,
+  BadRequestException,
 } from '@nestjs/common';
 
 import type { Agent } from './interfaces/agent.interface.js';
@@ -60,6 +61,7 @@ export class AgentsService {
 
   // 创建 Agent
   create(data: Pick<Agent, 'name' | 'description' | 'model'>): Agent {
+    this.validateInput(data, false);
     const agent: Agent = {
       id: this.nextId++,
       name: data.name,
@@ -79,6 +81,7 @@ export class AgentsService {
     id: number,
     data: Partial<Pick<Agent, 'name' | 'description' | 'model'>>,
   ): Agent {
+    this.validateInput(data, true);
     const agent = this.agents.find((item) => item.id === id);
 
     if (!agent) {
@@ -89,4 +92,21 @@ export class AgentsService {
 
     return agent;
   }
+  private validateInput(data: unknown, partial: boolean): void {
+    if (!data || typeof data !== 'object' || Array.isArray(data)) {
+      throw new BadRequestException('请求体必须是对象');
+    }
+    const fields = ['name', 'description', 'model'] as const;
+    if (Object.keys(data).some((key) => !fields.includes(key as typeof fields[number]))) {
+      throw new BadRequestException('只允许 name、description、model');
+    }
+    for (const field of fields) {
+      const value: unknown = Reflect.get(data, field);
+      if (partial && value === undefined) continue;
+      if (typeof value !== 'string' || (field !== 'description' && !value.trim())) {
+        throw new BadRequestException(`${field} 必须是字符串，name 和 model 不能为空`);
+      }
+    }
+  }
+
 }
