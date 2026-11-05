@@ -1,132 +1,182 @@
-<p align="center">
-  <a href="http://nestjs.com/" target="blank"><img src="https://nestjs.com/img/logo-small.svg" width="120" alt="Nest Logo" /></a>
-</p>
+# NestJS Study 23：缓存键与写后失效
 
-[circleci-image]: https://img.shields.io/circleci/build/github/nestjs/nest/master?token=abc123def456
-[circleci-url]: https://circleci.com/gh/nestjs/nest
+用 AI Agent 目录理解自动缓存、用户维度缓存和主动失效。对应 Techniques 的 Caching，是 Study 22 基础缓存之后的进阶示例。
 
-  <p align="center">A progressive <a href="http://nodejs.org" target="_blank">Node.js</a> framework for building efficient and scalable server-side applications.</p>
-    <p align="center">
-<a href="https://www.npmjs.com/~nestjscore" target="_blank"><img src="https://img.shields.io/npm/v/@nestjs/core.svg" alt="NPM Version" /></a>
-<a href="https://www.npmjs.com/~nestjscore" target="_blank"><img src="https://img.shields.io/npm/l/@nestjs/core.svg" alt="Package License" /></a>
-<a href="https://www.npmjs.com/~nestjscore" target="_blank"><img src="https://img.shields.io/npm/dm/@nestjs/common.svg" alt="NPM Downloads" /></a>
-<a href="https://circleci.com/gh/nestjs/nest" target="_blank"><img src="https://img.shields.io/circleci/build/github/nestjs/nest/master" alt="CircleCI" /></a>
-<a href="https://discord.gg/G7Qnnhy" target="_blank"><img src="https://img.shields.io/badge/discord-online-brightgreen.svg" alt="Discord"/></a>
-<a href="https://opencollective.com/nest#backer" target="_blank"><img src="https://opencollective.com/nest/backers/badge.svg" alt="Backers on Open Collective" /></a>
-<a href="https://opencollective.com/nest#sponsor" target="_blank"><img src="https://opencollective.com/nest/sponsors/badge.svg" alt="Sponsors on Open Collective" /></a>
-  <a href="https://paypal.me/kamilmysliwiec" target="_blank"><img src="https://img.shields.io/badge/Donate-PayPal-ff3f59.svg" alt="Donate us"/></a>
-    <a href="https://opencollective.com/nest#sponsor"  target="_blank"><img src="https://img.shields.io/badge/Support%20us-Open%20Collective-41B883.svg" alt="Support us"></a>
-  <a href="https://twitter.com/nestframework" target="_blank"><img src="https://img.shields.io/twitter/follow/nestframework.svg?style=social&label=Follow" alt="Follow us on Twitter"></a>
-</p>
-  <!--[![Backers on Open Collective](https://opencollective.com/nest/backers/badge.svg)](https://opencollective.com/nest#backer)
-  [![Sponsors on Open Collective](https://opencollective.com/nest/sponsors/badge.svg)](https://opencollective.com/nest#sponsor)-->
+本章所有业务数据和缓存均在当前进程内。虽然依赖中存在 Redis 适配器，但源码没有注册 Redis Store，启动时不需要 Redis，也不会调用真实模型。
 
-## Description
+## 学完应理解什么
 
-[Nest](https://github.com/nestjs/nest) framework TypeScript starter repository.
+- 缓存键描述的是“哪份结果”，不能只考虑 URL，也要考虑结果所属用户。
+- `CacheInterceptor` 可以复用响应缓存流程；覆盖 `trackBy()` 决定是否缓存以及使用哪个键。
+- `CACHE_MANAGER` 是注入 Token；Service 通过它手动读写模型目录缓存。
+- TTL 限制最长存活时间，主动失效则让写入尽快反映到后续读取。
+- HTTP 请求体的 TypeScript 类型不会自动阻止客户端覆盖 `id`，需要运行时 DTO 验证。
 
-## Project setup
+## 业务和教学边界
 
-```bash
-$ pnpm install
+公开目录返回启用的 Agent，个人目录按 `x-demo-user-id` 分组。更新或删除 Agent 时，公开列表、该条详情和所属用户的列表都可能过期，其他用户列表无需清除。
+
+`x-demo-user-id` 是可随意设置的教学标识，**不是认证**。所有接口公开，缓存管理接口也无管理员权限。个人目录不保存秘密，请勿把它直接作为真实租户隔离方案。真实系统应从认证后的用户身份生成缓存键，并保护写接口和管理接口。
+
+## 目录和推荐阅读顺序
+
+```text
+src/
+├── app.module.ts                  # 装配全局缓存和四个业务模块
+├── main.ts
+├── agents/
+│   ├── agents.controller.ts        # 公开列表、详情和写接口
+│   ├── agents.service.ts           # 内存数据和写后失效
+│   ├── agents.module.ts
+│   ├── agent.interface.ts
+│   └── dto/update-agent.dto.ts     # 只接受可修改字段
+├── cache/
+│   ├── cache.module.ts             # 全局 CACHE_MANAGER 和失效服务
+│   ├── cache-keys.ts               # 集中定义业务键
+│   ├── cache-invalidation.service.ts
+│   └── interceptors/
+│       ├── agent-cache.interceptor.ts
+│       └── user-cache.interceptor.ts
+├── users/                         # 演示用户维度的 GET 缓存
+├── models/                        # Service 手动缓存模型目录
+└── cache-admin/                   # 显式清除公开列表和详情
 ```
 
-## Compile and run the project
+建议依次阅读 [AppModule](src/app.module.ts)、[缓存模块](src/cache/cache.module.ts)、[CacheKeys](src/cache/cache-keys.ts)、[两个拦截器](src/cache/interceptors/)、[AgentsService](src/agents/agents.service.ts)，最后看用户和模型模块。先理解依赖如何可见，再追踪缓存键，最后分析一次写入影响哪些读取。
 
-```bash
-# development
-$ pnpm run start
+## 核心实现
 
-# watch mode
-$ pnpm run start:dev
+### 为什么集中定义键
 
-# production mode
-$ pnpm run start:prod
+[cache-keys.ts](src/cache/cache-keys.ts) 同时供拦截器、模型服务和失效服务使用：
+
+```ts
+agentDetail: (agentId: number) => `agents:detail:${agentId}`,
+userAgents: (userId: number) => `users:${userId}:agents`,
 ```
 
-## Run tests
+如果写接口和读接口各自拼接不同格式，删除缓存即使没有报错，也可能删不到真正使用的键。
 
-```bash
-# unit tests
-$ pnpm run test
+### 自动缓存与用户缓存
 
-# e2e tests
-$ pnpm run test:e2e
+[AgentCacheInterceptor](src/cache/interceptors/agent-cache.interceptor.ts) 只为 `GET /agents` 和数字详情路径生成键。列表 TTL 为 5000 毫秒，详情为 10000 毫秒。
 
-# test coverage
-$ pnpm run test:cov
+[UserCacheInterceptor](src/cache/interceptors/user-cache.interceptor.ts) 只处理 `/users/me/agents`，从合法的正整数 header 生成 `users:1001:agents` 一类的键。Controller 仍会校验 header；`@Headers()` 本身不接受第二个 Pipe 参数，因此这里显式调用 `ParseIntPipe` 并检查安全正整数。
+
+“未返回缓存键”代表跳过缓存，不代表身份校验成功。拦截器只解决结果分组问题。
+
+### 更新之后删除哪些键
+
+[AgentsService.update()](src/agents/agents.service.ts) 只赋值 `name/model/enabled`，然后等待 `invalidateAgent(agent.id, agent.userId)` 完成：
+
+```mermaid
+flowchart TD
+  P[PATCH Agent] --> V[UpdateAgentDto 验证]
+  V --> W[修改内存 Agent]
+  W --> D[CacheInvalidationService]
+  D --> L[删除公开列表键]
+  D --> A[删除当前详情键]
+  D --> U[删除所属用户列表键]
+  G[后续 GET] --> M[缓存未命中]
+  M --> F[读取最新内存数据并重新缓存]
 ```
 
-## Deployment
+DTO 会拒绝 `id/userId` 等额外字段及错误类型，避免数据归属被覆盖后失效了错误用户的缓存。Service 同样只选择允许修改的字段。
 
-When you're ready to deploy your NestJS application to production, there are some key steps you can take to ensure it runs as efficiently as possible. Check out the [deployment documentation](https://docs.nestjs.com/deployment) for more information.
+### 手动缓存模型目录
 
-If you are looking for a cloud-based platform to deploy your NestJS application, check out [Mau](https://mau.nestjs.com), our official platform for deploying NestJS applications on AWS. Mau makes deployment straightforward and fast, requiring just a few simple steps:
+[ModelsService](src/models/models.service.ts) 的执行顺序是 `get → 未命中时模拟查询 1 秒 → set`。键为 `models:catalog`，TTL 60000 毫秒。第二次请求可观察 `Cache Hit` 日志，不再执行模拟查询。
 
-```bash
-$ pnpm install -g @nestjs/mau
-$ mau deploy
-```
+当前 cache-manager 7 的 TTL 单位为毫秒。旧资料中以秒为单位的示例不能直接套用。
 
-With Mau, you can deploy your application in just a few clicks, allowing you to focus on building features rather than managing infrastructure.
+## 独立运行
 
-## Observability
-
-In production applications, observability is essential for understanding how your system behaves, detecting issues early, and maintaining reliable performance.
-
-[NestJS Observe](https://observe.nestjs.com) automatically instruments your NestJS application, giving you deep visibility into your system with minimal setup:
-
-- **Distributed tracing:** Follow requests across services and understand how they flow through your system.
-- **Waterfall analysis:** Visualize request execution and identify slow operations, bottlenecks, and unexpected delays.
-- **Performance analysis:** Analyze application performance in real time and quickly pinpoint areas that need optimization.
-- **Metrics:** Track key application and infrastructure metrics to understand system health and performance trends.
-- **Logging:** Centralize and correlate logs with traces and other telemetry to make debugging easier.
-- **Error tracking:** Detect errors quickly and investigate their root causes with the surrounding context.
-- **SLA monitoring:** Track service-level objectives and identify when your application is approaching or exceeding defined thresholds.
-- **Alarms and alerts:** Set up alerts for critical errors, performance degradation, SLA violations, and other anomalies so your team can react quickly.
-
-To add it to this project, run this and approve the code it prints at [observe.nestjs.com/link](https://observe.nestjs.com/link) - signing up for free if you have no account:
+建议使用 Node.js 24、pnpm 12；实际依赖由本目录的 `pnpm-lock.yaml` 固定。主框架安装版本为 NestJS 12，缓存使用 `@nestjs/cache-manager` 12 和 cache-manager 7。
 
 ```bash
-$ npx @nestjs/observe link
+cd nestjs-study-23
+pnpm install --frozen-lockfile
+pnpm start:dev
 ```
 
-It installs `@nestjs/observe`, wires it into `AppModule` and `main.ts`, and writes the app key and secret into `.env`, which every `nest start` script (`start`, `start:dev`, `start:debug`) then loads. In production, set `OBSERVE_APP_KEY` and `OBSERVE_APP_SECRET` in the environment instead.
-
-Or do it by hand:
+默认端口 3000；运行其他 Study 时先退出，或使用 `PORT=3023 pnpm start:dev`。无需环境变量、数据库、Redis 或真实模型密钥。重启后数据和缓存都重置。
 
 ```bash
-$ pnpm install @nestjs/observe
+pnpm build
+pnpm exec tsc --noEmit --incremental false
+pnpm lint
+pnpm test
+pnpm test:e2e
 ```
 
-Then follow the [setup guide](https://docs.nestjs.com/observability/sdk) - it takes a single import and an app key.
+本项目配置的是 Oxlint，而非 ESLint。e2e 先编译再导入真实 AppModule，覆盖实际拦截器与缓存存储，不以 Hello World 代替业务验证。
 
-The free plan needs no payment details and covers 300,000 events a month. You can also browse the [live demo](https://www.observe-demo.nestjs.com/dashboard) first - the whole dashboard over a busy service's data, with nothing to install.
+## 实际 API
 
-## Resources
+| 方法 | 路径 | 行为 |
+| --- | --- | --- |
+| GET | `/` | 保留的 Hello World |
+| GET | `/agents` | 缓存公开启用列表 |
+| GET | `/agents/:id` | 缓存启用 Agent 详情 |
+| PATCH | `/agents/:id` | 更新允许字段并失效关联缓存 |
+| DELETE | `/agents/:id` | 删除并失效关联缓存 |
+| GET | `/users/me/agents` | 按 demo header 分组缓存 |
+| GET | `/models` | 手动缓存模型目录 |
+| DELETE | `/cache/agents` | 清除公开列表 |
+| DELETE | `/cache/agents/:id` | 清除指定详情 |
 
-Check out a few resources that may come in handy when working with NestJS:
+## HTTP 验证
 
-- Visit the [NestJS Documentation](https://docs.nestjs.com) to learn more about the framework.
-- For questions and support, please visit our [Discord channel](https://discord.gg/G7Qnnhy).
-- To dive deeper and get more hands-on experience, check out our official video [courses](https://courses.nestjs.com/).
-- Deploy your application to AWS with the help of [NestJS Mau](https://mau.nestjs.com) in just a few clicks.
-- Auto-instrument your application with [NestJS Observe](https://observe.nestjs.com). Distributed tracing, metrics, and logging made easy. Error tracking and performance monitoring for your NestJS applications.
-- Visualize your application graph and interact with the NestJS application in real-time using [NestJS Devtools](https://devtools.nestjs.com).
-- Need help with your project (part-time to full-time)? Check out our official [enterprise support](https://enterprise.nestjs.com).
-- To stay in the loop and get updates, follow us on [X](https://x.com/nestframework) and [LinkedIn](https://linkedin.com/company/nestjs).
-- Looking for a job, or have a job to offer? Check out our official [Jobs board](https://jobs.nestjs.com).
+在新启动的进程上依次执行，观察终端中 Service 查询日志：
 
-## Support
+```bash
+curl -s http://localhost:3000/agents
+curl -s http://localhost:3000/agents
+curl -s http://localhost:3000/agents/1
+curl -s http://localhost:3000/users/me/agents -H 'x-demo-user-id: 1001'
+curl -s http://localhost:3000/users/me/agents -H 'x-demo-user-id: 1002'
+```
 
-Nest is an MIT-licensed open source project. It can grow thanks to the sponsors and support by the amazing backers. If you'd like to join them, please [read more here](https://docs.nestjs.com/support).
+重复读取命中缓存后不会重复打印对应查询日志。两个用户分别得到 ID 1、2 的 Agent。
 
-## Stay in touch
+```bash
+curl -i -X PATCH http://localhost:3000/agents/1 \
+  -H 'Content-Type: application/json' -d '{"name":"Updated Research"}'
+curl -s http://localhost:3000/agents/1
+curl -s http://localhost:3000/users/me/agents -H 'x-demo-user-id: 1001'
+curl -i -X PATCH http://localhost:3000/agents/1 \
+  -H 'Content-Type: application/json' -d '{"userId":1002}'
+curl -i http://localhost:3000/users/me/agents
+```
 
-- Author - [Kamil Myśliwiec](https://twitter.com/kammysliwiec)
-- Website - [https://nestjs.com](https://nestjs.com/)
-- Twitter - [@nestframework](https://twitter.com/nestframework)
+更新返回 200，后续详情和用户列表包含新名称；非法归属字段以及缺少 header 均返回 400。
 
-## License
+```bash
+curl -s http://localhost:3000/models
+curl -s http://localhost:3000/models
+curl -i -X DELETE http://localhost:3000/cache/agents
+curl -i -X DELETE http://localhost:3000/cache/agents/1
+```
 
-Nest is [MIT licensed](https://github.com/nestjs/nest/blob/master/LICENSE).
+首次模型请求约等待一秒，第二次读取缓存。清除公开列表不会清除模型目录或个人列表。
+
+## 常见问题与应用思考
+
+“安装了 Redis 包为何没有 Redis 数据？”是否使用外部 Store 取决于 `CacheModule.register()` 的实际配置，安装依赖本身不会启用它。
+
+“禁用后的 Agent 详情为何 404？”公开详情只返回启用 Agent；个人列表仍可以展示自己禁用的条目。
+
+单进程内存缓存不能在多个服务实例间共享。即使换成 Redis，读写并发时仍可能发生旧值回填；本章的写后删除演示基础策略，不声称解决分布式一致性。
+
+## 练习
+
+1. 将列表 TTL 改为 1000 毫秒，比较缓存命中与过期后的日志。
+2. 修改用户 1001 的 Agent，确认用户 1002 的缓存仍然命中。
+3. 为模型目录新增手动失效方法，复用已有键定义，并补充验证请求。
+
+本章重点是业务数据与缓存结果之间的关系。下一章转向输出序列化：即使缓存正确，返回给客户端的字段仍需要明确规则。
+
+## 官方参考
+
+- [中文 Caching](https://docs.nestjs.cn/techniques/caching/)
+- [英文 Caching](https://docs.nestjs.com/techniques/caching)
