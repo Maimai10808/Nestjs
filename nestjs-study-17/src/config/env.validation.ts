@@ -1,4 +1,4 @@
-import * as Joi from 'joi';
+import Joi from 'joi';
 
 export const envValidationSchema = Joi.object({
   NODE_ENV: Joi.string()
@@ -21,6 +21,8 @@ export const envValidationSchema = Joi.object({
     .min(0)
     .max(2)
     .default(0.7),
+
+  AI_MAX_TOKENS: Joi.number().integer().min(1).max(1000000).default(4096),
 
   AI_TIMEOUT: Joi.number()
     .integer()

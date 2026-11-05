@@ -11,6 +11,8 @@ export default registerAs('ai', () => ({
     process.env.AI_TEMPERATURE ?? 0.7,
   ),
 
+  timeout: Number(process.env.AI_TIMEOUT ?? 30000),
+
   maxTokens: Number(
     process.env.AI_MAX_TOKENS ?? 4096,
   ),

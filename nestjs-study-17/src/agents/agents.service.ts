@@ -1,4 +1,4 @@
-import { Injectable } from '@nestjs/common';
+import { Injectable, BadRequestException } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 
 @Injectable()
@@ -27,7 +27,10 @@ export class AgentsService {
     };
   }
 
-  async generate(prompt: string) {
+  async generate(prompt: unknown) {
+    if (typeof prompt !== 'string' || !prompt.trim()) {
+      throw new BadRequestException('prompt 必须是非空字符串');
+    }
     const config = this.getConfiguration();
 
     // 模拟 AI 模型调用
