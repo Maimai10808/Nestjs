@@ -1,4 +1,5 @@
 import {
+  BadRequestException,
   Controller,
   Get,
   Headers,
@@ -14,17 +15,23 @@ import { UserCacheInterceptor } from '../cache/interceptors/user-cache.intercept
 
 @Controller('users')
 export class UsersController {
-  constructor(
-    private readonly agentsService: AgentsService,
-  ) {}
+  constructor(private readonly agentsService: AgentsService) {}
 
   @Get('me/agents')
   @UseInterceptors(UserCacheInterceptor)
   @CacheTTL(10000)
-  findMyAgents(
-    @Headers('x-demo-user-id', ParseIntPipe)
-    userId: number,
-  ) {
+  async findMyAgents(@Headers('x-demo-user-id') rawUserId: string | undefined) {
+    const userId = await new ParseIntPipe().transform(rawUserId, {
+      type: 'custom',
+      data: 'x-demo-user-id',
+    });
+    if (
+      typeof userId !== 'number' ||
+      !Number.isSafeInteger(userId) ||
+      userId < 1
+    ) {
+      throw new BadRequestException('x-demo-user-id 必须是正整数');
+    }
     return this.agentsService.findByUser(userId);
   }
 }

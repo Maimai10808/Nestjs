@@ -53,14 +53,9 @@ export class AgentsService {
   }
 
   findByUser(userId: number): Agent[] {
-  console.log(
-    `[AgentsService] 查询用户 ${userId} 的 Agent`,
-  );
-
-  return this.agents.filter(
-    (agent) => agent.userId === userId,
-  );
-}
+    console.log(`[AgentsService] 查询用户 ${userId} 的 Agent`);
+    return this.agents.filter((agent) => agent.userId === userId);
+  }
 
   async update(
     id: number,
@@ -75,7 +70,9 @@ export class AgentsService {
     }
 
     // 更新业务数据
-    Object.assign(agent, data);
+    if (data.name !== undefined) agent.name = data.name;
+    if (data.model !== undefined) agent.model = data.model;
+    if (data.enabled !== undefined) agent.enabled = data.enabled;
 
     // 数据更新成功后，清除相关缓存
     await this.cacheInvalidation.invalidateAgent(
