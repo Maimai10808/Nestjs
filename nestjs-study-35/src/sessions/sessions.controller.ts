@@ -10,7 +10,9 @@ import {
 } from '@nestjs/common';
 
 import type { Request } from 'express';
-import type { Session as ExpressSession } from 'express-session';
+import type { Session as ExpressSession, SessionData } from 'express-session';
+
+type AgentSession = ExpressSession & Partial<SessionData>;
 
 import { SessionGuard } from '../auth/session.guard.js';
 
@@ -21,7 +23,7 @@ export class SessionsController {
   // 1. 查询当前 Session 信息
   @Get('info')
   getSessionInfo(
-    @Session() session: ExpressSession,
+    @Session() session: AgentSession,
   ) {
     return {
       userId: session.userId,
@@ -33,7 +35,7 @@ export class SessionsController {
   // 2. 查询用户偏好
   @Get('preferences')
   getPreferences(
-    @Session() session: ExpressSession,
+    @Session() session: AgentSession,
   ) {
     return {
       preferences: session.preferences ?? {
@@ -46,7 +48,7 @@ export class SessionsController {
   // 3. 修改用户偏好
   @Post('preferences')
   updatePreferences(
-    @Session() session: ExpressSession,
+    @Session() session: AgentSession,
 
     @Body()
     body: {
@@ -55,6 +57,7 @@ export class SessionsController {
     },
   ) {
     if (
+      !body ||
       !['light', 'dark'].includes(body.theme) ||
       !['zh', 'en'].includes(body.language)
     ) {
@@ -77,7 +80,7 @@ export class SessionsController {
   // 4. 统计当前 Session 访问次数
   @Get('visits')
   getVisits(
-    @Session() session: ExpressSession,
+    @Session() session: AgentSession,
   ) {
     session.visits = (session.visits ?? 0) + 1;
 

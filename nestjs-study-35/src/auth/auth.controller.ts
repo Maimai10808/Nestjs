@@ -4,11 +4,12 @@ import {
   Get,
   Post,
   Req,
+  Res,
   UseGuards,
   UnauthorizedException,
 } from '@nestjs/common';
 
-import type { Request } from 'express';
+import type { Request, Response } from 'express';
 
 import { AuthService } from './auth.service.js';
 import { LoginDto } from './dto/login.dto.js';
@@ -82,6 +83,7 @@ export class AuthController {
   @Post('logout')
   async logout(
     @Req() request: Request,
+    @Res({ passthrough: true }) response: Response,
   ) {
     await new Promise<void>((resolve, reject) => {
       request.session.destroy((error) => {
@@ -92,6 +94,13 @@ export class AuthController {
 
         resolve();
       });
+    });
+
+    response.clearCookie('agent.sid', {
+      path: '/',
+      httpOnly: true,
+      secure: process.env.NODE_ENV === 'production',
+      sameSite: 'lax',
     });
 
     return {
