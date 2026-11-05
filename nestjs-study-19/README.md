@@ -1,132 +1,193 @@
-<p align="center">
-  <a href="http://nestjs.com/" target="blank"><img src="https://nestjs.com/img/logo-small.svg" width="120" alt="Nest Logo" /></a>
-</p>
+# NestJS Study 19：PostgreSQL 与 TypeORM
 
-[circleci-image]: https://img.shields.io/circleci/build/github/nestjs/nest/master?token=abc123def456
-[circleci-url]: https://circleci.com/gh/nestjs/nest
+用“用户拥有 Agent、Agent 拥有任务”的数据关系，学习 Nest 的 SQL 集成。与前面的内存数组不同，本章会真实连接 PostgreSQL，保存记录并通过外键维护关联。
 
-  <p align="center">A progressive <a href="http://nodejs.org" target="_blank">Node.js</a> framework for building efficient and scalable server-side applications.</p>
-    <p align="center">
-<a href="https://www.npmjs.com/~nestjscore" target="_blank"><img src="https://img.shields.io/npm/v/@nestjs/core.svg" alt="NPM Version" /></a>
-<a href="https://www.npmjs.com/~nestjscore" target="_blank"><img src="https://img.shields.io/npm/l/@nestjs/core.svg" alt="Package License" /></a>
-<a href="https://www.npmjs.com/~nestjscore" target="_blank"><img src="https://img.shields.io/npm/dm/@nestjs/common.svg" alt="NPM Downloads" /></a>
-<a href="https://circleci.com/gh/nestjs/nest" target="_blank"><img src="https://img.shields.io/circleci/build/github/nestjs/nest/master" alt="CircleCI" /></a>
-<a href="https://discord.gg/G7Qnnhy" target="_blank"><img src="https://img.shields.io/badge/discord-online-brightgreen.svg" alt="Discord"/></a>
-<a href="https://opencollective.com/nest#backer" target="_blank"><img src="https://opencollective.com/nest/backers/badge.svg" alt="Backers on Open Collective" /></a>
-<a href="https://opencollective.com/nest#sponsor" target="_blank"><img src="https://opencollective.com/nest/sponsors/badge.svg" alt="Sponsors on Open Collective" /></a>
-  <a href="https://paypal.me/kamilmysliwiec" target="_blank"><img src="https://img.shields.io/badge/Donate-PayPal-ff3f59.svg" alt="Donate us"/></a>
-    <a href="https://opencollective.com/nest#sponsor"  target="_blank"><img src="https://img.shields.io/badge/Support%20us-Open%20Collective-41B883.svg" alt="Support us"></a>
-  <a href="https://twitter.com/nestframework" target="_blank"><img src="https://img.shields.io/twitter/follow/nestframework.svg?style=social&label=Follow" alt="Follow us on Twitter"></a>
-</p>
-  <!--[![Backers on Open Collective](https://opencollective.com/nest/backers/badge.svg)](https://opencollective.com/nest#backer)
-  [![Sponsors on Open Collective](https://opencollective.com/nest/sponsors/badge.svg)](https://opencollective.com/nest#sponsor)-->
+这是关系型数据与 Repository 的教学项目。任务状态由 HTTP 手动更新，没有调用模型，也没有后台 Worker。`userId` 只是关系字段，不代表已经认证的当前用户。
 
-## Description
+## 学习目标
 
-[Nest](https://github.com/nestjs/nest) framework TypeScript starter repository.
+- `TypeOrmModule.forRootAsync()`：从配置 Provider 创建数据库连接。
+- `forFeature()` 与 `@InjectRepository()`：让业务服务获得对应实体的 Repository。
+- `ManyToOne` / `OneToMany`：表达用户、Agent 与任务的关系。
+- `relations`：显式决定查询哪些关联，而非假设关系字段总会自动加载。
+- DTO 校验、404 和 409：把请求错误与数据库约束错误转换为可理解的响应。
+- `onDelete: 'CASCADE'`：理解删除父记录会影响哪些数据。
 
-## Project setup
+## 目录结构
 
-```bash
-$ pnpm install
+```text
+src/
+├── main.ts                         # 监听 HTTP，启用关闭钩子
+├── app.module.ts                   # 配置、异步连接、全局验证管道
+├── config/database.config.ts
+├── common/pipes/parse-database-id.pipe.ts # 限制路径 ID 为数据库整数范围
+├── users/
+│   ├── users.module.ts / users.controller.ts / users.service.ts
+│   ├── dto/create-user.dto.ts
+│   └── entities/user.entity.ts
+├── agents/
+│   ├── agents.module.ts / agents.controller.ts / agents.service.ts
+│   ├── dto/create-agent.dto.ts / update-agent.dto.ts
+│   └── entities/agent.entity.ts
+└── tasks/
+    ├── tasks.module.ts / tasks.controller.ts / tasks.service.ts
+    ├── dto/create-task.dto.ts / update-task-status.dto.ts
+    └── entities/agent-task.entity.ts
 ```
 
-## Compile and run the project
+## 数据与执行流程
 
-```bash
-# development
-$ pnpm run start
-
-# watch mode
-$ pnpm run start:dev
-
-# production mode
-$ pnpm run start:prod
+```mermaid
+erDiagram
+    USER ||--o{ AGENT : owns
+    AGENT ||--o{ AGENT_TASK : has
 ```
 
-## Run tests
-
-```bash
-# unit tests
-$ pnpm run test
-
-# e2e tests
-$ pnpm run test:e2e
-
-# test coverage
-$ pnpm run test:cov
+```mermaid
+flowchart LR
+    A[HTTP JSON] --> B[全局 ValidationPipe]
+    B --> C[Controller]
+    C --> D[Service 与关联存在性检查]
+    D --> E[注入的 Repository]
+    E --> F[(PostgreSQL)]
 ```
 
-## Deployment
+### 连接与实体注册各负责什么
 
-When you're ready to deploy your NestJS application to production, there are some key steps you can take to ensure it runs as efficiently as possible. Check out the [deployment documentation](https://docs.nestjs.com/deployment) for more information.
+[AppModule](src/app.module.ts) 注入 `databaseConfig.KEY`，工厂返回 PostgreSQL 连接参数。`autoLoadEntities: true` 收集业务模块中由 `forFeature([Entity])` 注册的实体；它不会自动把仓库中的任意实体文件变成业务模块。
 
-If you are looking for a cloud-based platform to deploy your NestJS application, check out [Mau](https://mau.nestjs.com), our official platform for deploying NestJS applications on AWS. Mau makes deployment straightforward and fast, requiring just a few simple steps:
+[UsersModule](src/users/users.module.ts) 为 `User` 注册 Repository 并导出 `UsersService`。AgentsModule 导入它，在保存 Agent 前确认用户存在；TasksModule 再导入 AgentsModule，确认任务所引用的 Agent 存在。存在性检查使用 `existsBy()`，避免仅为校验外键而加载整个关联任务历史。这是一条单向依赖链，无需循环依赖。
 
-```bash
-$ pnpm install -g @nestjs/mau
-$ mau deploy
+### 外键、加载与级联
+
+[Agent 实体](src/agents/entities/agent.entity.ts) 同时保留 `userId` 和 `user` 关系：前者用于明确写入外键，后者用于加载关联对象。
+
+```ts
+@ManyToOne(() => User, user => user.agents, {
+  nullable: false, onDelete: 'CASCADE'
+})
+@JoinColumn({ name: 'userId' })
+user: Relation<User>;
 ```
 
-With Mau, you can deploy your application in just a few clicks, allowing you to focus on building features rather than managing infrastructure.
+`Relation<User>` 是当前 TypeORM 提供的类型包装。它避免 ESM 装饰器元数据在循环实体导入时过早读取尚未初始化的类；关系回调仍指向真实实体，并没有删除关系。
 
-## Observability
+用户详情加载 agents，Agent 详情加载 user 与 tasks，任务详情加载 agent。删除用户会由数据库级联删除其 Agent，再删除任务。这是数据库外键行为，不等于 ORM 自动保存任意嵌套对象。
 
-In production applications, observability is essential for understanding how your system behaves, detecting issues early, and maintaining reliable performance.
+### 输入和数据库错误
 
-[NestJS Observe](https://observe.nestjs.com) automatically instruments your NestJS application, giving you deep visibility into your system with minimal setup:
+[DTO](src/agents/dto/create-agent.dto.ts) 必须是 class，并通过值导入传给 Controller，供 ValidationPipe 使用运行时元数据。全局管道拒绝额外字段，防止更新请求覆盖 `id` 或 `userId`；更新允许省略字段，但拒绝 `name: null` 等破坏数据形状的值。具体 DTO 的可选 class 字段在运行时可能是自有的 undefined，Service 只将明确提供的标量字段交给 Repository.update，再读取完整结果，避免响应丢字段，也避免把陈旧 tasks 关系图交给 save 后触发孤儿处理、误删并发新增任务。路径和外键 ID 限制在 PostgreSQL integer 的 1～2147483647 范围，非法范围在查询前返回 400。
 
-- **Distributed tracing:** Follow requests across services and understand how they flow through your system.
-- **Waterfall analysis:** Visualize request execution and identify slow operations, bottlenecks, and unexpected delays.
-- **Performance analysis:** Analyze application performance in real time and quickly pinpoint areas that need optimization.
-- **Metrics:** Track key application and infrastructure metrics to understand system health and performance trends.
-- **Logging:** Centralize and correlate logs with traces and other telemetry to make debugging easier.
-- **Error tracking:** Detect errors quickly and investigate their root causes with the surrounding context.
-- **SLA monitoring:** Track service-level objectives and identify when your application is approaching or exceeding defined thresholds.
-- **Alarms and alerts:** Set up alerts for critical errors, performance degradation, SLA violations, and other anomalies so your team can react quickly.
+关联不存在返回 404；重复邮箱依据 PostgreSQL 唯一约束错误 `23505` 映射为 409。其他数据库故障仍作为服务故障暴露，不伪装成成功。状态只允许 `pending/running/completed/failed`，当前没有额外状态机迁移限制。
 
-To add it to this project, run this and approve the code it prints at [observe.nestjs.com/link](https://observe.nestjs.com/link) - signing up for free if you have no account:
+## 如何运行
+
+建议 Node.js 24、pnpm 12、Docker。已安装 Nest 12.3.2、`@nestjs/typeorm 12.0.2`、TypeORM 1.1.2、pg 8.23.1；依赖版本以本章锁文件为准，不需要升级教程到其他 ORM 版本。
+
+先启动独立学习数据库：
 
 ```bash
-$ npx @nestjs/observe link
+docker run --name nestjs-study19-postgres --rm \
+  -e POSTGRES_USER=study \
+  -e POSTGRES_PASSWORD=study_local_only \
+  -e POSTGRES_DB=agent_study \
+  -p 127.0.0.1:5433:5432 -d postgres:17-alpine
+cd nestjs-study-19
+pnpm install --frozen-lockfile
+cp .env.example .env
+pnpm start:dev
 ```
 
-It installs `@nestjs/observe`, wires it into `AppModule` and `main.ts`, and writes the app key and secret into `.env`, which every `nest start` script (`start`, `start:dev`, `start:debug`) then loads. In production, set `OBSERVE_APP_KEY` and `OBSERVE_APP_SECRET` in the environment instead.
+若端口或容器名已占用，请使用新的名称和端口，并同步 `.env`。`--rm` 示例没有挂载持久卷，停止容器后学习数据会丢失。
 
-Or do it by hand:
+| 环境变量 | 示例值 |
+| --- | --- |
+| DATABASE_HOST | 127.0.0.1 |
+| DATABASE_PORT | 5433（容器内仍为 5432） |
+| DATABASE_USERNAME | study |
+| DATABASE_PASSWORD | study_local_only |
+| DATABASE_NAME | agent_study |
+| PORT | 3000 |
+
+`AppModule` 使用 `synchronize: true` 自动同步学习表结构，**只能连接专用学习数据库**。真实项目应采用迁移和受控数据库账号。例子中的密码是公开本地夹具，不是生产秘密。
+
+## API
+
+| Method | Endpoint | 用途 |
+| --- | --- | --- |
+| GET / POST | /users | 列表 / 创建用户 |
+| GET / DELETE | /users/:id | 含 agents 的详情 / 删除用户并级联 |
+| GET / POST | /agents | 含 user 的列表 / 创建 Agent |
+| GET / PATCH / DELETE | /agents/:id | 含 user、tasks 的详情 / 更新 / 删除 |
+| GET / POST | /tasks | 含 agent 的列表 / 创建 pending 任务 |
+| GET / DELETE | /tasks/:id | 任务详情 / 删除 |
+| PATCH | /tasks/:id/status | 手动更新状态与可选 output |
+
+## HTTP 验证
+
+以下命令在一个新学习数据库中执行；已有数据时，把示例 ID 替换成前一步实际返回的 ID。
 
 ```bash
-$ pnpm install @nestjs/observe
+curl -X POST http://localhost:3000/users \
+  -H 'Content-Type: application/json' \
+  -d '{"name":"Learner","email":"learner@example.test"}'
+curl -X POST http://localhost:3000/agents \
+  -H 'Content-Type: application/json' \
+  -d '{"name":"Research","description":"SQL demo","model":"mock","userId":1}'
+curl -X POST http://localhost:3000/tasks \
+  -H 'Content-Type: application/json' \
+  -d '{"agentId":1,"input":"解释关系型数据"}'
+curl http://localhost:3000/agents/1
+curl -X PATCH http://localhost:3000/tasks/1/status \
+  -H 'Content-Type: application/json' \
+  -d '{"status":"completed","output":"模拟研究报告"}'
 ```
 
-Then follow the [setup guide](https://docs.nestjs.com/observability/sdk) - it takes a single import and an app key.
+创建响应为 201；Agent 详情应带 `user` 与 `tasks`，任务最初为 pending，更新后为 completed。
 
-The free plan needs no payment details and covers 300,000 events a month. You can also browse the [live demo](https://www.observe-demo.nestjs.com/dashboard) first - the whole dashboard over a busy service's data, with nothing to install.
+```bash
+# 400：不是枚举值
+curl -i -X PATCH http://localhost:3000/tasks/1/status \
+  -H 'Content-Type: application/json' -d '{"status":"anything"}'
+# 400：不允许借更新请求转移归属
+curl -i -X PATCH http://localhost:3000/agents/1 \
+  -H 'Content-Type: application/json' -d '{"userId":2}'
+# 409：重复上面的邮箱
+curl -i -X POST http://localhost:3000/users \
+  -H 'Content-Type: application/json' \
+  -d '{"name":"Duplicate","email":"learner@example.test"}'
+# 删除后，所属 Agent、任务的详情应为 404
+curl -X DELETE http://localhost:3000/users/1
+curl -i http://localhost:3000/tasks/1
+```
 
-## Resources
+## 检查与常见问题
 
-Check out a few resources that may come in handy when working with NestJS:
+```bash
+pnpm build
+pnpm exec tsc --noEmit --incremental false
+pnpm lint
+pnpm test
+RUN_DATABASE_E2E=1 pnpm test:e2e
+```
 
-- Visit the [NestJS Documentation](https://docs.nestjs.com) to learn more about the framework.
-- For questions and support, please visit our [Discord channel](https://discord.gg/G7Qnnhy).
-- To dive deeper and get more hands-on experience, check out our official video [courses](https://courses.nestjs.com/).
-- Deploy your application to AWS with the help of [NestJS Mau](https://mau.nestjs.com) in just a few clicks.
-- Auto-instrument your application with [NestJS Observe](https://observe.nestjs.com). Distributed tracing, metrics, and logging made easy. Error tracking and performance monitoring for your NestJS applications.
-- Visualize your application graph and interact with the NestJS application in real-time using [NestJS Devtools](https://devtools.nestjs.com).
-- Need help with your project (part-time to full-time)? Check out our official [enterprise support](https://enterprise.nestjs.com).
-- To stay in the loop and get updates, follow us on [X](https://x.com/nestframework) and [LinkedIn](https://linkedin.com/company/nestjs).
-- Looking for a job, or have a job to offer? Check out our official [Jobs board](https://jobs.nestjs.com).
+e2e 真实连接 `.env` 或进程变量指定的 PostgreSQL，创建唯一邮箱夹具并删除自己创建的用户。显式开关避免无意连接已有数据库；不要对共享或生产库运行。它不替你启动数据库。关闭应用会释放连接池。
 
-## Support
+连接被拒绝时先检查 Docker 与宿主端口，不能把容器内 5432 与宿主 5433 混用。遇到实体元数据错误时检查 `forFeature()` 和关系类导入，不要通过移除关系绕过问题。
 
-Nest is an MIT-licensed open source project. It can grow thanks to the sponsors and support by the amazing backers. If you'd like to join them, please [read more here](https://docs.nestjs.com/support).
+## 推荐阅读顺序与练习
 
-## Stay in touch
+1. [AppModule](src/app.module.ts) 与 [database.config](src/config/database.config.ts)：理解连接来源。
+2. 三个 `entities` 文件：画出外键和删除影响。
+3. [UsersModule](src/users/users.module.ts) → [AgentsModule](src/agents/agents.module.ts) → [TasksModule](src/tasks/tasks.module.ts)：跟踪 Repository 注册和跨模块依赖。
+4. 对照 DTO、Controller 和 Service，沿创建任务的请求读到数据库。
+5. [业务测试](test/app.e2e-spec.ts)：观察真实外键与错误响应。
 
-- Author - [Kamil Myśliwiec](https://twitter.com/kammysliwiec)
-- Website - [https://nestjs.com](https://nestjs.com/)
-- Twitter - [@nestframework](https://twitter.com/nestframework)
+1. 为用户新增一个普通展示字段，依次修改实体、DTO 和验证请求。
+2. 比较带与不带 `relations` 的查询结果，解释为何没有关联对象。
+3. 删除一个 Agent，确认用户保留、其任务被级联删除。
+4. 思考把 userId 改为登录身份需要哪些认证和归属检查；本章没有实现认证。
 
-## License
+本章建立“请求边界 → 服务 → Repository → 数据约束”的完整链路。生产项目还要考虑迁移、事务、分页、认证与并发删除竞态；这里不把简单关系示例扩展成完整业务系统。
 
-Nest is [MIT licensed](https://github.com/nestjs/nest/blob/master/LICENSE).
+参考：[中文 SQL](https://docs.nestjs.cn/techniques/sql/)、[英文数据库入口](https://docs.nestjs.com/techniques/sql)、[TypeORM 关系](https://typeorm.io/docs/relations/relations/)。
