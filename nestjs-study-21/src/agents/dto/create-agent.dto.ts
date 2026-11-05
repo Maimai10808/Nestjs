@@ -4,7 +4,7 @@ import {
   IsIn,
   IsNumber,
   IsInt,
-  IsOptional,
+  ValidateIf,
   IsArray,
   ArrayMaxSize,
   ArrayUnique,
@@ -24,7 +24,7 @@ export class CreateAgentDto {
   name!: string;
 
   // Agent 描述：可选，最长 500 字符
-  @IsOptional()
+  @ValidateIf((_object, value: unknown) => value !== undefined)
   @IsString()
   @MaxLength(500)
   description?: string;
@@ -61,7 +61,7 @@ export class CreateAgentDto {
   tools!: string[];
 
   // 是否启用
-  @IsOptional()
+  @ValidateIf((_object, value: unknown) => value !== undefined)
   @IsBoolean()
   enabled?: boolean;
 }

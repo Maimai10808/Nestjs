@@ -6,6 +6,7 @@ import {
   IsBoolean,
   IsInt,
   IsOptional,
+  IsObject,
   IsArray,
   ArrayMaxSize,
   ArrayUnique,
@@ -42,6 +43,7 @@ export class RunAgentDto {
 
   // 嵌套执行选项
   @IsOptional()
+  @IsObject()
   @ValidateNested()
   @Type(() => AgentRunOptionsDto)
   options?: AgentRunOptionsDto;
