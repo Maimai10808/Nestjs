@@ -13,14 +13,14 @@ import {
   AgentFailedEvent,
 } from '../events/agent.events.js';
 
-interface Agent {
+export interface Agent {
   id: number;
   name: string;
   model: string;
   enabled: boolean;
 }
 
-interface AgentExecution {
+export interface AgentExecution {
   id: number;
   agentId: number;
   userId: number;

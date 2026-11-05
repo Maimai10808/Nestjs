@@ -1,6 +1,6 @@
 import { Injectable } from '@nestjs/common';
 
-interface UserAnalytics {
+export interface UserAnalytics {
   userId: number;
   totalExecutions: number;
   totalTokens: number;

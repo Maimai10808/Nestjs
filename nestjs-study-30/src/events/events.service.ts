@@ -1,6 +1,6 @@
 import { Injectable } from '@nestjs/common';
 
-interface EventHistory {
+export interface EventHistory {
   id: number;
   eventName: string;
   payload: unknown;

@@ -1,6 +1,6 @@
 import { Injectable } from '@nestjs/common';
 
-interface AuditRecord {
+export interface AuditRecord {
   id: number;
   executionId: number;
   userId: number;
