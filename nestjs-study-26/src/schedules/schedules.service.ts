@@ -135,10 +135,10 @@ export class SchedulesService {
   }
 
   // 暂停 Cron
-  pauseCron(name: string) {
+  async pauseCron(name: string) {
     const job = this.getCronJob(name);
 
-    job.stop();
+    await job.stop();
 
     return {
       message: '任务已暂停',
@@ -160,10 +160,10 @@ export class SchedulesService {
   }
 
   // 删除 Cron
-  deleteCron(name: string) {
+  async deleteCron(name: string) {
     const job = this.getCronJob(name);
 
-    job.stop();
+    await job.stop();
 
     this.schedulerRegistry.deleteCronJob(name);
 
