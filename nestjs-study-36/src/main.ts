@@ -12,12 +12,12 @@ async function bootstrap() {
 
   // 静态资源目录
   app.useStaticAssets(
-    join(process.cwd(), 'public'),
+    join(import.meta.dirname, 'public'),
   );
 
   // 模板目录
   app.setBaseViewsDir(
-    join(process.cwd(), 'views'),
+    join(import.meta.dirname, 'views'),
   );
 
   // 模板引擎

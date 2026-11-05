@@ -69,7 +69,7 @@ export class ReportsController {
     const viewName =
       report.status === 'completed'
         ? 'report'
-        : 'report-print';
+        : 'report-generating';
 
     return response.render(viewName, {
       report,
