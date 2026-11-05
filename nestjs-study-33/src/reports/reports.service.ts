@@ -1,10 +1,12 @@
 import {
   Injectable,
+  StreamableFile,
   NotFoundException,
 } from '@nestjs/common';
 
 import {
   mkdir,
+  open,
   writeFile,
   stat,
 } from 'node:fs/promises';
@@ -110,4 +112,26 @@ LangGraph 是一个用于构建有状态 AI Agent 工作流的框架。
 
     return report;
   }
+  // 路径只来自服务端生成的记录，客户端只能提交报告 ID。
+  async downloadReport(id: number): Promise<StreamableFile> {
+    const report = this.findOne(id);
+    let file: Awaited<ReturnType<typeof open>> | undefined;
+    try {
+      file = await open(report.path, 'r');
+      const info = await file.stat();
+      // 流结束、出错或客户端断开后，ReadStream 自动关闭文件句柄。
+      return new StreamableFile(file.createReadStream(), {
+        type: report.mimeType,
+        disposition: `attachment; filename="${report.filename}"`,
+        length: info.size,
+      });
+    } catch (error) {
+      await file?.close();
+      if (error instanceof Error && 'code' in error && error.code === 'ENOENT') {
+        throw new NotFoundException('研究报告文件不存在，请重新生成');
+      }
+      throw error;
+    }
+  }
+
 }

@@ -37,6 +37,11 @@ export class ReportsController {
     );
   }
 
+  @Get(':id/download')
+  download(@Param('id', ParseIntPipe) id: number) {
+    return this.reportsService.downloadReport(id);
+  }
+
   // 查询报告详情
   @Get(':id')
   findOne(
