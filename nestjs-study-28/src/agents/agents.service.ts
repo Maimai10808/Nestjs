@@ -69,11 +69,6 @@ export class AgentsService {
       (item) => item.id === agentId,
     );
 
-    this.logger.logAgentEvent(
-  agentId,
-  'execution_started',
-);
-
     if (!agent) {
       this.logger.warn(
         `Agent 不存在，agentId=${agentId}`,
@@ -93,6 +88,8 @@ export class AgentsService {
         'Agent 不存在或未启用',
       );
     }
+
+    this.logger.logAgentEvent(agentId, 'execution_started');
 
     const startTime = Date.now();
 
