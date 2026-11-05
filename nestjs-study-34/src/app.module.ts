@@ -12,7 +12,7 @@ import { AiModule } from './ai/ai.module.js';
 
 import { AgentsModule } from './agents/agents.module.js';
 
-import { HttpDemoModule } from './http-demo/http-demo.module.js';
+
 
 @Module({
   imports: [
@@ -30,7 +30,7 @@ import { HttpDemoModule } from './http-demo/http-demo.module.js';
 
     AgentsModule,
 
-    HttpDemoModule,
+
   ],
 })
 export class AppModule {}

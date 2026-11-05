@@ -17,13 +17,13 @@ import {
   catchError,
 } from 'rxjs';
 
-interface SearchResult {
+export interface SearchResult {
   title: string;
   url: string;
   snippet: string;
 }
 
-interface SearchResponse {
+export interface SearchResponse {
   query: string;
   results: SearchResult[];
 }
@@ -33,9 +33,6 @@ export class SearchService {
   private readonly logger = new Logger(
     SearchService.name,
   );
-
-  private readonly baseUrl =
-    'http://127.0.0.1:3000';
 
   constructor(
     private readonly httpService: HttpService,
@@ -51,7 +48,7 @@ export class SearchService {
     const { data } = await firstValueFrom(
       this.httpService
         .get<SearchResponse>(
-          `${this.baseUrl}/external/search`,
+          '/external/search',
           {
             params: {
               q: query,

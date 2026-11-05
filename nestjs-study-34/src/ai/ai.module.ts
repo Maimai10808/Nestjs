@@ -1,14 +1,17 @@
 import { Module } from '@nestjs/common';
 
 import { HttpModule } from '@nestjs/axios';
+import { ConfigModule, ConfigService } from '@nestjs/config';
+import { createHttpOptions } from '../http-options.js';
 
 import { AiService } from './ai.service.js';
 
 @Module({
   imports: [
-    HttpModule.register({
-      timeout: 5000,
-      maxRedirects: 0,
+    HttpModule.registerAsync({
+      imports: [ConfigModule],
+      inject: [ConfigService],
+      useFactory: createHttpOptions,
     }),
   ],
   providers: [AiService],

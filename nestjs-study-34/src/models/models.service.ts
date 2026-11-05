@@ -1,11 +1,8 @@
-import {
-  Injectable,
-  Logger,
-} from '@nestjs/common';
+import { Injectable, BadGatewayException, Logger } from '@nestjs/common';
 
 import { HttpService } from '@nestjs/axios';
 
-interface AiModel {
+export interface AiModel {
   id: string;
   provider: string;
   contextWindow: number;
@@ -13,22 +10,20 @@ interface AiModel {
 
 @Injectable()
 export class ModelsService {
-  private readonly logger = new Logger(
-    ModelsService.name,
-  );
+  private readonly logger = new Logger(ModelsService.name);
 
-  constructor(
-    private readonly httpService: HttpService,
-  ) {}
+  constructor(private readonly httpService: HttpService) {}
 
   async findAll(): Promise<AiModel[]> {
     this.logger.log('开始获取 AI 模型目录');
 
-    const response =
-      await this.httpService.axiosRef.get<AiModel[]>(
-        'http://127.0.0.1:3000/external/models',
-      );
+    try {
+      const response =
+        await this.httpService.axiosRef.get<AiModel[]>('/external/models');
 
-    return response.data;
+      return response.data;
+    } catch {
+      throw new BadGatewayException('外部模型目录服务暂时不可用');
+    }
   }
 }

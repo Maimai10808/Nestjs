@@ -34,7 +34,7 @@ export class AiService {
     try {
       const { data } = await firstValueFrom(
         this.httpService.post<AiGenerateResponse>(
-          'http://127.0.0.1:3000/external/ai/generate',
+          '/external/ai/generate',
           {
             prompt,
           },
