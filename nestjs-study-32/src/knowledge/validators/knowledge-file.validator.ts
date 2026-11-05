@@ -1,3 +1,4 @@
+import type {} from 'multer';
 import { FileValidator } from '@nestjs/common';
 import { extname } from 'node:path';
 
@@ -11,15 +12,9 @@ export class KnowledgeFileValidator extends FileValidator<KnowledgeFileValidator
       return false;
     }
 
-    const extension = extname(
-      file.originalname,
-    ).toLowerCase();
+    const extension = extname(file.originalname).toLowerCase();
 
-    if (
-      !this.validationOptions.allowedExtensions.includes(
-        extension,
-      )
-    ) {
+    if (!this.validationOptions.allowedExtensions.includes(extension)) {
       return false;
     }
 
@@ -27,13 +22,18 @@ export class KnowledgeFileValidator extends FileValidator<KnowledgeFileValidator
     if (extension === '.pdf') {
       return (
         file.buffer.length >= 5 &&
-        file.buffer.subarray(0, 5).toString() ===
-          '%PDF-'
+        file.buffer.subarray(0, 5).toString() === '%PDF-'
       );
     }
 
-    // 其他格式在本学习项目中按扩展名进行初步验证
-    return true;
+    // 文本必须是非空 UTF-8，拒绝伪装为 txt/md 的二进制内容。
+    if (file.buffer.length === 0 || file.buffer.includes(0)) return false;
+    try {
+      new TextDecoder('utf-8', { fatal: true }).decode(file.buffer);
+      return true;
+    } catch {
+      return false;
+    }
   }
 
   buildErrorMessage(): string {

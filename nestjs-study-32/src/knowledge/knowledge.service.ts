@@ -1,13 +1,7 @@
-import {
-  Injectable,
-  NotFoundException,
-} from '@nestjs/common';
+import type {} from 'multer';
+import { Injectable, NotFoundException } from '@nestjs/common';
 
-import {
-  mkdir,
-  writeFile,
-  unlink,
-} from 'node:fs/promises';
+import { mkdir, open, unlink } from 'node:fs/promises';
 
 import { randomUUID } from 'node:crypto';
 
@@ -23,10 +17,7 @@ export class KnowledgeService {
 
   private nextId = 1;
 
-  private readonly uploadDir = join(
-    process.cwd(),
-    'uploads',
-  );
+  private readonly uploadDir = join(process.cwd(), 'uploads');
 
   // 保存单个文件
   async saveFile(
@@ -37,29 +28,35 @@ export class KnowledgeService {
       recursive: true,
     });
 
-    const extension = extname(
-      file.originalname,
-    ).toLowerCase();
+    const extension = extname(file.originalname).toLowerCase();
 
     const storedName = `${randomUUID()}${extension}`;
 
-    const filePath = join(
-      this.uploadDir,
-      storedName,
-    );
+    const filePath = join(this.uploadDir, storedName);
 
-    await writeFile(
-      filePath,
-      file.buffer,
-      { flag: 'wx' },
-    );
+    // open 成功后才拥有这个文件；EEXIST 时不能删除已有文件。
+    const handle = await open(filePath, 'wx');
+    try {
+      await handle.writeFile(file.buffer);
+    } catch (error) {
+      await handle.close();
+      await unlink(filePath);
+      throw error;
+    }
+    await handle.close();
 
     const knowledgeFile: KnowledgeFile = {
       id: this.nextId++,
       agentId: metadata.agentId,
       originalName: file.originalname,
       storedName,
-      mimeType: file.mimetype,
+      // Content-Type 来自客户端，存储使用已验证扩展名对应的类型。
+      mimeType:
+        extension === '.pdf'
+          ? 'application/pdf'
+          : extension === '.md'
+            ? 'text/markdown'
+            : 'text/plain',
       size: file.size,
       path: filePath,
       description: metadata.description,
@@ -78,14 +75,10 @@ export class KnowledgeService {
 
   // 查询单个文件
   findOne(id: number): KnowledgeFile {
-    const file = this.files.find(
-      (item) => item.id === id,
-    );
+    const file = this.files.find((item) => item.id === id);
 
     if (!file) {
-      throw new NotFoundException(
-        '知识库文件不存在',
-      );
+      throw new NotFoundException('知识库文件不存在');
     }
 
     return file;
@@ -97,9 +90,7 @@ export class KnowledgeService {
 
     await unlink(file.path);
 
-    const index = this.files.findIndex(
-      (item) => item.id === id,
-    );
+    const index = this.files.findIndex((item) => item.id === id);
 
     this.files.splice(index, 1);
   }
