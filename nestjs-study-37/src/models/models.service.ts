@@ -1,6 +1,6 @@
 import { Injectable } from '@nestjs/common';
 
-interface AiModel {
+export interface AiModel {
   id: string;
   provider: string;
   contextWindow: number;

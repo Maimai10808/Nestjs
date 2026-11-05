@@ -10,10 +10,11 @@ import { ValidationPipe } from '@nestjs/common';
 import { AppModule } from './app.module.js';
 
 async function bootstrap() {
+  const adapter = new FastifyAdapter();
   const app =
     await NestFactory.create<NestFastifyApplication>(
       AppModule,
-      new FastifyAdapter(),
+      adapter,
     );
 
   app.useGlobalPipes(
@@ -24,7 +25,7 @@ async function bootstrap() {
     }),
   );
 
-  const fastify = app.getHttpAdapter().getInstance();
+  const fastify = adapter.getInstance();
 
   fastify.addHook('onRequest', async (request) => {
     request.log.info(

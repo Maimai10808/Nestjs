@@ -3,7 +3,7 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 
-interface Agent {
+export interface Agent {
   id: number;
   name: string;
   description: string;
