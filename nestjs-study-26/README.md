@@ -1,132 +1,178 @@
-<p align="center">
-  <a href="http://nestjs.com/" target="blank"><img src="https://nestjs.com/img/logo-small.svg" width="120" alt="Nest Logo" /></a>
-</p>
+# NestJS Study 26：任务调度
 
-[circleci-image]: https://img.shields.io/circleci/build/github/nestjs/nest/master?token=abc123def456
-[circleci-url]: https://circleci.com/gh/nestjs/nest
+通过每日 AI 研究、启动检查和可配置 Agent 任务，学习 NestJS Task Scheduling。定时器负责“何时触发”，AgentsService 负责“执行什么”。本章所有 Agent 输出都是 Mock，数据和调度配置均在内存中。
 
-  <p align="center">A progressive <a href="http://nodejs.org" target="_blank">Node.js</a> framework for building efficient and scalable server-side applications.</p>
-    <p align="center">
-<a href="https://www.npmjs.com/~nestjscore" target="_blank"><img src="https://img.shields.io/npm/v/@nestjs/core.svg" alt="NPM Version" /></a>
-<a href="https://www.npmjs.com/~nestjscore" target="_blank"><img src="https://img.shields.io/npm/l/@nestjs/core.svg" alt="Package License" /></a>
-<a href="https://www.npmjs.com/~nestjscore" target="_blank"><img src="https://img.shields.io/npm/dm/@nestjs/common.svg" alt="NPM Downloads" /></a>
-<a href="https://circleci.com/gh/nestjs/nest" target="_blank"><img src="https://img.shields.io/circleci/build/github/nestjs/nest/master" alt="CircleCI" /></a>
-<a href="https://discord.gg/G7Qnnhy" target="_blank"><img src="https://img.shields.io/badge/discord-online-brightgreen.svg" alt="Discord"/></a>
-<a href="https://opencollective.com/nest#backer" target="_blank"><img src="https://opencollective.com/nest/backers/badge.svg" alt="Backers on Open Collective" /></a>
-<a href="https://opencollective.com/nest#sponsor" target="_blank"><img src="https://opencollective.com/nest/sponsors/badge.svg" alt="Sponsors on Open Collective" /></a>
-  <a href="https://paypal.me/kamilmysliwiec" target="_blank"><img src="https://img.shields.io/badge/Donate-PayPal-ff3f59.svg" alt="Donate us"/></a>
-    <a href="https://opencollective.com/nest#sponsor"  target="_blank"><img src="https://img.shields.io/badge/Support%20us-Open%20Collective-41B883.svg" alt="Support us"></a>
-  <a href="https://twitter.com/nestframework" target="_blank"><img src="https://img.shields.io/twitter/follow/nestframework.svg?style=social&label=Follow" alt="Follow us on Twitter"></a>
-</p>
-  <!--[![Backers on Open Collective](https://opencollective.com/nest/backers/badge.svg)](https://opencollective.com/nest#backer)
-  [![Sponsors on Open Collective](https://opencollective.com/nest/sponsors/badge.svg)](https://opencollective.com/nest#sponsor)-->
+## 学习目标
 
-## Description
+- `ScheduleModule.forRoot()` 如何启动装饰器发现与调度注册。
+- `@Cron/@Interval/@Timeout` 分别适合固定时刻、固定间隔和延迟一次的工作。
+- `SchedulerRegistry` 如何让运行时创建的 Cron 与计时器可查询、暂停和删除。
+- DTO 验证与 Cron 表达式验证各自负责什么。
+- 理解应用关闭会清理调度器，但已开始的业务 Promise 与调度注册不是同一件事。
 
-[Nest](https://github.com/nestjs/nest) framework TypeScript starter repository.
+## 场景与实际职责
 
-## Project setup
+研究 Agent 每天上海时间 09:00 执行一次；每 30 秒输出累计执行数；启动 10 秒后输出初始化检查日志。还可以通过 HTTP 新建 Cron 或一次性延迟任务。
 
-```bash
-$ pnpm install
+Agent 本身耗时约一秒，只生成执行记录，不调用模型。记录中的 trigger 区分 `manual/cron/delayed`；定期检查只统计记录，不执行新的 Agent。
+
+## 目录结构与阅读顺序
+
+```text
+src/
+├── main.ts                         # HTTP 启动与关闭信号钩子
+├── app.module.ts                    # ScheduleModule.forRoot()
+├── agents/
+│   ├── agents.module.ts            # 导出 AgentsService 给调度模块
+│   ├── agents.controller.ts        # 手动执行和历史记录
+│   ├── agents.service.ts           # Mock 执行，不负责计算调度时间
+│   └── agent.interface.ts
+└── schedules/
+    ├── schedules.module.ts         # 注册两个 Service 和 Controller
+    ├── agent-scheduler.service.ts  # 三个静态装饰器
+    ├── schedules.controller.ts     # 动态调度 HTTP 入口
+    ├── schedules.service.ts        # Registry 管理动态任务
+    └── dto/
+        ├── create-cron.dto.ts
+        └── create-delayed.dto.ts
 ```
 
-## Compile and run the project
+建议 [AppModule](src/app.module.ts) → [SchedulesModule](src/schedules/schedules.module.ts) → [静态调度](src/schedules/agent-scheduler.service.ts) → [动态调度](src/schedules/schedules.service.ts) → [DTO](src/schedules/dto/) → [AgentsService](src/agents/agents.service.ts)。装饰器写在未注册的 Provider 上不会自动运行，所以先检查模块装配。
 
-```bash
-# development
-$ pnpm run start
+## 核心原理
 
-# watch mode
-$ pnpm run start:dev
+### 静态装饰器与时区
 
-# production mode
-$ pnpm run start:prod
+```ts
+@Cron('0 0 9 * * *', {
+  name: 'daily-research',
+  timeZone: 'Asia/Shanghai',
+  waitForCompletion: true,
+})
 ```
 
-## Run tests
+这条 Cron 使用六字段格式，第一位是秒。固定上海时区后，不受机器系统时区影响。`waitForCompletion` 表示当前调用尚未完成时跳过重叠触发，不会把每个错过的时刻排入持久队列。
 
-```bash
-# unit tests
-$ pnpm run test
+[AgentSchedulerService](src/schedules/agent-scheduler.service.ts) 还包含 `@Interval(30000)` 和 `@Timeout(10000)`，单位均为毫秒。两个未指定名称的调度器由框架生成名称，查询列表时不应假设名称固定。
 
-# e2e tests
-$ pnpm run test:e2e
+### 动态注册为什么需要 Registry
 
-# test coverage
-$ pnpm run test:cov
+```mermaid
+flowchart TD
+  C[POST schedules/cron] --> V[CreateCronDto]
+  V --> S[SchedulesService]
+  S --> A[确认 Agent 可用]
+  S --> E[CronTime 验证表达式]
+  E --> J[创建 CronJob]
+  J --> R[SchedulerRegistry 注册并启动]
+  R --> B[到时间调用 AgentsService]
+  B --> H[内存执行记录]
 ```
 
-## Deployment
+[SchedulesService](src/schedules/schedules.service.ts) 先检查名称冲突和 Agent，再用 `CronTime` 验证表达式。DTO 只能保证表达式是字符串，不能代替 Cron 解析器。
 
-When you're ready to deploy your NestJS application to production, there are some key steps you can take to ensure it runs as efficiently as possible. Check out the [deployment documentation](https://docs.nestjs.com/deployment) for more information.
+创建后先 `addCronJob(name, job)` 再启动。查询时读取 Registry；暂停与删除等待当前 cron 4 的异步 `stop()` 返回，恢复调用 `start()`。名称不存在时返回明确 404，而非底层 Registry 异常。
 
-If you are looking for a cloud-based platform to deploy your NestJS application, check out [Mau](https://mau.nestjs.com), our official platform for deploying NestJS applications on AWS. Mau makes deployment straightforward and fast, requiring just a few simple steps:
+动态 Cron 没有设置 `waitForCompletion`，任务周期短于执行时间时可能重叠。这是与静态 daily-research 配置的一个区别。
 
-```bash
-$ pnpm install -g @nestjs/mau
-$ mau deploy
-```
+### 一次性任务与关闭
 
-With Mau, you can deploy your application in just a few clicks, allowing you to focus on building features rather than managing infrastructure.
+延迟任务由 `setTimeout` 创建，并通过 `addTimeout` 注册；触发后先移除注册记录，再调用业务服务。因此超时列表只表示待触发计时器，不能当作正在运行的任务列表。
 
-## Observability
+关闭时 `@nestjs/schedule` 的编排器会清理 Registry 中的 Cron、Interval 和 Timeout，应用无需重复维护另一套清理集合。main 开启 shutdown hooks，使关闭信号触发框架生命周期。已经开始执行的 Agent Promise 不会因为移除定时器而自动中断；本章不实现强制取消或持久化任务恢复。
 
-In production applications, observability is essential for understanding how your system behaves, detecting issues early, and maintaining reliable performance.
+## 运行
 
-[NestJS Observe](https://observe.nestjs.com) automatically instruments your NestJS application, giving you deep visibility into your system with minimal setup:
-
-- **Distributed tracing:** Follow requests across services and understand how they flow through your system.
-- **Waterfall analysis:** Visualize request execution and identify slow operations, bottlenecks, and unexpected delays.
-- **Performance analysis:** Analyze application performance in real time and quickly pinpoint areas that need optimization.
-- **Metrics:** Track key application and infrastructure metrics to understand system health and performance trends.
-- **Logging:** Centralize and correlate logs with traces and other telemetry to make debugging easier.
-- **Error tracking:** Detect errors quickly and investigate their root causes with the surrounding context.
-- **SLA monitoring:** Track service-level objectives and identify when your application is approaching or exceeding defined thresholds.
-- **Alarms and alerts:** Set up alerts for critical errors, performance degradation, SLA violations, and other anomalies so your team can react quickly.
-
-To add it to this project, run this and approve the code it prints at [observe.nestjs.com/link](https://observe.nestjs.com/link) - signing up for free if you have no account:
+建议 Node.js 24、pnpm 12。本项目使用 NestJS 12、`@nestjs/schedule` 12 和 cron 4，不需要 Redis、数据库或真实模型。
 
 ```bash
-$ npx @nestjs/observe link
+cd nestjs-study-26
+pnpm install --frozen-lockfile
+pnpm start:dev
 ```
 
-It installs `@nestjs/observe`, wires it into `AppModule` and `main.ts`, and writes the app key and secret into `.env`, which every `nest start` script (`start`, `start:dev`, `start:debug`) then loads. In production, set `OBSERVE_APP_KEY` and `OBSERVE_APP_SECRET` in the environment instead.
-
-Or do it by hand:
+默认端口为 3000，可用 `PORT=3026 pnpm start:dev` 修改。启动后不需要请求就会注册静态调度器，等待十秒可观察初始化日志。
 
 ```bash
-$ pnpm install @nestjs/observe
+pnpm build
+pnpm exec tsc --noEmit --incremental false
+pnpm lint
+pnpm test
+pnpm test:e2e
 ```
 
-Then follow the [setup guide](https://docs.nestjs.com/observability/sdk) - it takes a single import and an app key.
+`lint` 使用 Oxlint。e2e 先编译，验证静态注册、动态 HTTP 控制、延迟触发的执行记录，以及 app.close 后 Registry 为空。
 
-The free plan needs no payment details and covers 300,000 events a month. You can also browse the [live demo](https://www.observe-demo.nestjs.com/dashboard) first - the whole dashboard over a busy service's data, with nothing to install.
+## API
 
-## Resources
+| 方法 | 路径 | 行为 |
+| --- | --- | --- |
+| GET | `/agents` | 查询三个 Mock Agent |
+| GET | `/agents/executions` | 查询内存执行记录 |
+| POST | `/agents/:id/run` | 手动执行，约一秒后返回 |
+| POST | `/schedules/cron` | 创建并启动动态 Cron |
+| GET | `/schedules/cron` | 查询 Cron 名称、状态、下一次时间 |
+| POST | `/schedules/cron/:name/pause` | 暂停 |
+| POST | `/schedules/cron/:name/resume` | 恢复 |
+| DELETE | `/schedules/cron/:name` | 删除 |
+| POST | `/schedules/delayed` | 创建一次性延迟任务 |
+| GET | `/schedules/intervals` | 查询 Interval 名称 |
+| GET | `/schedules/timeouts` | 查询未触发 Timeout 名称 |
 
-Check out a few resources that may come in handy when working with NestJS:
+POST 默认返回 201；查询和删除成功返回 200。未注册脚手架 AppController，没有根路径接口。
 
-- Visit the [NestJS Documentation](https://docs.nestjs.com) to learn more about the framework.
-- For questions and support, please visit our [Discord channel](https://discord.gg/G7Qnnhy).
-- To dive deeper and get more hands-on experience, check out our official video [courses](https://courses.nestjs.com/).
-- Deploy your application to AWS with the help of [NestJS Mau](https://mau.nestjs.com) in just a few clicks.
-- Auto-instrument your application with [NestJS Observe](https://observe.nestjs.com). Distributed tracing, metrics, and logging made easy. Error tracking and performance monitoring for your NestJS applications.
-- Visualize your application graph and interact with the NestJS application in real-time using [NestJS Devtools](https://devtools.nestjs.com).
-- Need help with your project (part-time to full-time)? Check out our official [enterprise support](https://enterprise.nestjs.com).
-- To stay in the loop and get updates, follow us on [X](https://x.com/nestframework) and [LinkedIn](https://linkedin.com/company/nestjs).
-- Looking for a job, or have a job to offer? Check out our official [Jobs board](https://jobs.nestjs.com).
+## HTTP 验证
 
-## Support
+```bash
+curl -s http://localhost:3000/schedules/cron
+curl -s http://localhost:3000/schedules/intervals
+curl -s http://localhost:3000/schedules/timeouts
+curl -i -X POST http://localhost:3000/schedules/cron \
+  -H 'Content-Type: application/json' \
+  -d '{"name":"demo-research","agentId":1,"cronExpression":"*/5 * * * * *"}'
+```
 
-Nest is an MIT-licensed open source project. It can grow thanks to the sponsors and support by the amazing backers. If you'd like to join them, please [read more here](https://docs.nestjs.com/support).
+初始 Cron 列表包含 daily-research。新增任务每五秒触发，约一秒后出现执行记录：
 
-## Stay in touch
+```bash
+sleep 7
+curl -s http://localhost:3000/agents/executions
+curl -i -X POST http://localhost:3000/schedules/cron/demo-research/pause
+curl -s http://localhost:3000/schedules/cron
+curl -i -X POST http://localhost:3000/schedules/cron/demo-research/resume
+curl -i -X DELETE http://localhost:3000/schedules/cron/demo-research
+```
 
-- Author - [Kamil Myśliwiec](https://twitter.com/kammysliwiec)
-- Website - [https://nestjs.com](https://nestjs.com/)
-- Twitter - [@nestframework](https://twitter.com/nestframework)
+暂停后 running 为 false，恢复后为 true，删除后列表不再包含该名称。
 
-## License
+```bash
+curl -i -X POST http://localhost:3000/schedules/delayed \
+  -H 'Content-Type: application/json' -d '{"name":"once","agentId":2,"delayMs":1000}'
+sleep 3
+curl -s http://localhost:3000/agents/executions
+curl -i -X POST http://localhost:3000/schedules/cron \
+  -H 'Content-Type: application/json' -d '{"name":"bad","agentId":1,"cronExpression":"bad"}'
+curl -i -X POST http://localhost:3000/schedules/delayed \
+  -H 'Content-Type: application/json' -d '{"name":"bad","agentId":1,"delayMs":1}'
+```
 
-Nest is [MIT licensed](https://github.com/nestjs/nest/blob/master/LICENSE).
+新增一条 trigger 为 delayed 的记录；非法表达式和不在 1000～3600000 毫秒范围内的延迟返回 400。重复任务名返回 409，不存在或未启用的 Agent 返回 404。
+
+## 常见问题与应用边界
+
+“每日任务没有马上执行？”它等待上海时间 09:00；用短周期动态任务验证即可，无需修改系统时间。
+
+“重启后自定义 Cron 消失？”动态任务只在当前进程 Registry。多实例部署时，每个实例也会各自触发静态任务。本章未提供分布式锁或唯一调度保证；需要持久化、重试和多 Worker 分发时可继续学习 Study 27。
+
+## 练习
+
+1. 为 Interval 指定固定名称，比较 Registry 查询结果。
+2. 将动态 Cron 周期调得短于一秒，观察重叠执行，再研究 waitForCompletion。
+3. 添加一个取消延迟任务的 HTTP 方法，使用 Registry 删除并验证不再产生执行记录。
+
+本章重点是调度与业务职责分离，以及调度注册的生命周期。不要把内存计时器误认为可靠任务队列。
+
+## 官方参考
+
+- [中文 Task Scheduling](https://docs.nestjs.cn/techniques/task-scheduling/)
+- [英文 Task Scheduling](https://docs.nestjs.com/techniques/task-scheduling)
