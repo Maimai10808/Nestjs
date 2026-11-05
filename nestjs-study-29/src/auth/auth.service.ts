@@ -7,7 +7,7 @@ import { SessionService } from './session.service.js';
 
 import type { LoginDto } from './dto/login.dto.js';
 
-interface User {
+export interface User {
   id: number;
   email: string;
   name: string;

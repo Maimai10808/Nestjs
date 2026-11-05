@@ -1,23 +1,15 @@
-import {
-  Body,
-  Controller,
-  Get,
-  Post,
-  Res,
-} from '@nestjs/common';
+import { Body, Controller, Get, Post, Res } from '@nestjs/common';
 
 import type { Response } from 'express';
 
 import { Cookies } from './cookies.decorator.js';
+import { PreferencesDto } from './dto/preferences.dto.js';
 
 @Controller('cookies')
 export class CookiesController {
-
   // 1. 查看 Cookie 信息
   @Get('debug')
-  debug(
-    @Cookies() cookies: Record<string, string>,
-  ) {
+  debug(@Cookies() cookies: Record<string, string>) {
     return {
       cookieNames: Object.keys(cookies ?? {}),
       message: 'Cookie 解析成功',
@@ -41,11 +33,7 @@ export class CookiesController {
   // 3. 保存用户偏好
   @Post('preferences')
   savePreferences(
-    @Body()
-    body: {
-      theme: 'light' | 'dark';
-      language: 'zh-CN' | 'en-US';
-    },
+    @Body() body: PreferencesDto,
 
     @Res({ passthrough: true })
     response: Response,
