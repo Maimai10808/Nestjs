@@ -1,6 +1,6 @@
 import { Module } from '@nestjs/common';
 import { ConfigModule } from '@nestjs/config';
-import * as Joi from 'joi';
+import Joi from 'joi';
 
 import aiConfig from './config/ai.config.js';
 import agentConfig from './config/agent.config.js';
@@ -96,9 +96,12 @@ import { QuotaModule } from './quota/quota.module.js';
 
       // 显式声明验证选项
       validationOptions: {
-        allowUnknown: true,
-        abortEarly: false,
-        convert: true,
+        // @nestjs/config 12 使用 Standard Schema 包装库专属选项。
+        libraryOptions: {
+          allowUnknown: true,
+          abortEarly: false,
+          convert: true,
+        },
       },
     }),
 

@@ -1,6 +1,7 @@
 import {
   Injectable,
   Inject,
+  BadRequestException,
 } from '@nestjs/common';
 
 import type { ConfigType } from '@nestjs/config';
@@ -26,6 +27,9 @@ export class QuotaService {
 
   // 模拟用户配额检查
   checkQuota(usedToday: number) {
+    if (!Number.isSafeInteger(usedToday) || usedToday < 0) {
+      throw new BadRequestException('usedToday 必须是非负安全整数');
+    }
     const remaining = Math.max(
       0,
       this.config.dailyLimit - usedToday,

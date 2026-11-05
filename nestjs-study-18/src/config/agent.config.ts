@@ -2,7 +2,7 @@ import { registerAs } from '@nestjs/config';
 
 export default registerAs('agent', () => ({
   maxSteps: Number(
-    process.env.AGENT_MAX_STEPS ?? 10,
+    process.env.AGENT_MAX_STEPS ?? 20,
   ),
 
   timeoutMs: Number(

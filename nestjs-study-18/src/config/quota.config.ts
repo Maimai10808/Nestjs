@@ -6,6 +6,6 @@ export default registerAs('quota', () => ({
   ),
 
   maxTokensPerRequest: Number(
-    process.env.QUOTA_MAX_TOKENS_PER_REQUEST ?? 8000,
+    process.env.QUOTA_MAX_TOKENS_PER_REQUEST ?? 8192,
   ),
 }));
