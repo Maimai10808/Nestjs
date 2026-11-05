@@ -3,6 +3,7 @@ import {
   IsString,
   IsNotEmpty,
   Min,
+  Max,
   MaxLength,
   IsOptional,
   MinLength,
@@ -31,5 +32,6 @@ export class RunAgentDto {
   @IsOptional()
   @IsInt()
   @Min(1)
+  @Max(2 ** 21 - 1)
   priority?: number;
 }

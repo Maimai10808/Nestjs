@@ -119,12 +119,15 @@ export class AgentsService {
       'completed',
       'failed',
       'delayed',
-      'paused',
     );
 
     return {
       queue: 'agent-tasks',
-      counts,
+      // BullMQ 6 的 waiting 已包含暂停列表；paused 不是 JobType。
+      counts: {
+        ...counts,
+        paused: (await this.agentQueue.isPaused()) ? counts.waiting : 0,
+      },
     };
   }
 
