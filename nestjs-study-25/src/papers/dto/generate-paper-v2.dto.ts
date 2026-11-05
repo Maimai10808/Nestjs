@@ -7,6 +7,7 @@ import {
   Max,
   ValidateNested,
   IsDefined,
+  IsObject,
 } from 'class-validator';
 
 import { Type } from 'class-transformer';
@@ -37,6 +38,7 @@ export class GeneratePaperV2Dto {
   topic!: string;
 
   @IsDefined()
+  @IsObject()
   @ValidateNested()
   @Type(() => PaperConfigDto)
   config!: PaperConfigDto;

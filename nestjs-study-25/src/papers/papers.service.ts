@@ -1,19 +1,16 @@
 import {
   Injectable,
   NotFoundException,
+  type OnModuleDestroy,
 } from '@nestjs/common';
 
-import type {
-  GeneratePaperV1Dto,
-} from './dto/generate-paper-v1.dto.js';
+import type { GeneratePaperV1Dto } from './dto/generate-paper-v1.dto.js';
 
-import type {
-  GeneratePaperV2Dto,
-} from './dto/generate-paper-v2.dto.js';
+import type { GeneratePaperV2Dto } from './dto/generate-paper-v2.dto.js';
 
-type PaperTaskStatus = 'pending' | 'completed';
+export type PaperTaskStatus = 'pending' | 'completed';
 
-interface PaperTask {
+export interface PaperTask {
   id: string;
   topic: string;
   status: PaperTaskStatus;
@@ -22,7 +19,14 @@ interface PaperTask {
 }
 
 @Injectable()
-export class PapersService {
+export class PapersService implements OnModuleDestroy {
+  private readonly timers = new Set<ReturnType<typeof setTimeout>>();
+
+  onModuleDestroy(): void {
+    for (const timer of this.timers) clearTimeout(timer);
+    this.timers.clear();
+  }
+
   private readonly tasks = new Map<string, PaperTask>();
 
   private nextTaskId = 1001;
@@ -50,7 +54,8 @@ export class PapersService {
     this.tasks.set(taskId, task);
 
     // 模拟异步任务执行
-    setTimeout(() => {
+    const timer = setTimeout(() => {
+      this.timers.delete(timer);
       task.status = 'completed';
 
       task.result =
@@ -58,6 +63,7 @@ export class PapersService {
         `目标字数：${dto.config.wordCount}。` +
         `引用格式：${dto.config.citationStyle}。`;
     }, 3000);
+    this.timers.add(timer);
 
     return {
       taskId,
@@ -79,10 +85,7 @@ export class PapersService {
 
   // V1 模型目录
   getModelsV1() {
-    return [
-      'gpt-4.1',
-      'gpt-4.1-mini',
-    ];
+    return ['gpt-4.1', 'gpt-4.1-mini'];
   }
 
   // V2 模型目录
