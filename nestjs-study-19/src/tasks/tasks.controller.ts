@@ -1,3 +1,6 @@
+import { ParseDatabaseIdPipe } from '../common/pipes/parse-database-id.pipe.js';
+import { CreateTaskDto } from './dto/create-task.dto.js';
+import { UpdateTaskStatusDto } from './dto/update-task-status.dto.js';
 import {
   Controller,
   Get,
@@ -6,12 +9,10 @@ import {
   Delete,
   Body,
   Param,
-  ParseIntPipe,
 } from '@nestjs/common';
 
 import { TasksService } from './tasks.service.js';
 
-import { AgentTaskStatus } from './entities/agent-task.entity.js';
 
 @Controller('tasks')
 export class TasksController {
@@ -28,7 +29,7 @@ export class TasksController {
   // GET /tasks/1
   @Get(':id')
   findOne(
-    @Param('id', ParseIntPipe) id: number,
+    @Param('id', ParseDatabaseIdPipe) id: number,
   ) {
     return this.tasksService.findOne(id);
   }
@@ -37,10 +38,7 @@ export class TasksController {
   @Post()
   create(
     @Body()
-    body: {
-      agentId: number;
-      input: string;
-    },
+    body: CreateTaskDto,
   ) {
     return this.tasksService.create(
       body.agentId,
@@ -51,12 +49,9 @@ export class TasksController {
   // PATCH /tasks/1/status
   @Patch(':id/status')
   updateStatus(
-    @Param('id', ParseIntPipe) id: number,
+    @Param('id', ParseDatabaseIdPipe) id: number,
     @Body()
-    body: {
-      status: AgentTaskStatus;
-      output?: string;
-    },
+    body: UpdateTaskStatusDto,
   ) {
     return this.tasksService.updateStatus(
       id,
@@ -68,7 +63,7 @@ export class TasksController {
   // DELETE /tasks/1
   @Delete(':id')
   remove(
-    @Param('id', ParseIntPipe) id: number,
+    @Param('id', ParseDatabaseIdPipe) id: number,
   ) {
     return this.tasksService.remove(id);
   }

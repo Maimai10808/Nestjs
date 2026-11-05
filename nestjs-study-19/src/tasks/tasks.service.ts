@@ -1,3 +1,4 @@
+import { AgentsService } from '../agents/agents.service.js';
 import {
   Injectable,
   NotFoundException,
@@ -17,6 +18,7 @@ export class TasksService {
   constructor(
     @InjectRepository(AgentTask)
     private readonly taskRepository: Repository<AgentTask>,
+    private readonly agentsService: AgentsService,
   ) {}
 
   // 查询所有任务
@@ -50,6 +52,7 @@ export class TasksService {
     agentId: number,
     input: string,
   ): Promise<AgentTask> {
+    await this.agentsService.assertExists(agentId);
     const task = this.taskRepository.create({
       agentId,
       input,

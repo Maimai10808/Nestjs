@@ -1,3 +1,4 @@
+import { UsersModule } from '../users/users.module.js';
 import { Module } from '@nestjs/common';
 
 import { TypeOrmModule } from '@nestjs/typeorm';
@@ -11,6 +12,7 @@ import { AgentsService } from './agents.service.js';
 @Module({
   imports: [
     TypeOrmModule.forFeature([Agent]),
+    UsersModule,
   ],
 
   controllers: [

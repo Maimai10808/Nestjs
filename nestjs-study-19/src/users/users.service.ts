@@ -1,11 +1,12 @@
 import {
   Injectable,
   NotFoundException,
+  ConflictException,
 } from '@nestjs/common';
 
 import { InjectRepository } from '@nestjs/typeorm';
 
-import { Repository } from 'typeorm';
+import { Repository, QueryFailedError } from 'typeorm';
 
 import { User } from './entities/user.entity.js';
 
@@ -38,6 +39,12 @@ export class UsersService {
     return user;
   }
 
+  async assertExists(id: number): Promise<void> {
+    if (!(await this.userRepository.existsBy({ id }))) {
+      throw new NotFoundException('用户不存在');
+    }
+  }
+
   // 创建用户
   async create(
     name: string,
@@ -48,7 +55,14 @@ export class UsersService {
       email,
     });
 
-    return this.userRepository.save(user);
+    try {
+      return await this.userRepository.save(user);
+    } catch (error: unknown) {
+      if (error instanceof QueryFailedError && 'code' in error.driverError && error.driverError.code === '23505') {
+        throw new ConflictException('邮箱已存在');
+      }
+      throw error;
+    }
   }
 
   // 删除用户

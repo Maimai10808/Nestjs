@@ -1,3 +1,4 @@
+import type { Relation } from 'typeorm';
 import {
   Entity,
   PrimaryGeneratedColumn,
@@ -42,7 +43,7 @@ export class AgentTask {
     onDelete: 'CASCADE',
   })
   @JoinColumn({ name: 'agentId' })
-  agent: Agent;
+  agent: Relation<Agent>;
 
   @CreateDateColumn()
   createdAt: Date;

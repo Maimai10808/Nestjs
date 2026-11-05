@@ -1,3 +1,5 @@
+import { ParseDatabaseIdPipe } from '../common/pipes/parse-database-id.pipe.js';
+import { CreateUserDto } from './dto/create-user.dto.js';
 import {
   Controller,
   Get,
@@ -5,7 +7,6 @@ import {
   Delete,
   Body,
   Param,
-  ParseIntPipe,
 } from '@nestjs/common';
 
 import { UsersService } from './users.service.js';
@@ -25,7 +26,7 @@ export class UsersController {
   // GET /users/1
   @Get(':id')
   findOne(
-    @Param('id', ParseIntPipe) id: number,
+    @Param('id', ParseDatabaseIdPipe) id: number,
   ) {
     return this.usersService.findOne(id);
   }
@@ -34,10 +35,7 @@ export class UsersController {
   @Post()
   create(
     @Body()
-    body: {
-      name: string;
-      email: string;
-    },
+    body: CreateUserDto,
   ) {
     return this.usersService.create(
       body.name,
@@ -48,7 +46,7 @@ export class UsersController {
   // DELETE /users/1
   @Delete(':id')
   remove(
-    @Param('id', ParseIntPipe) id: number,
+    @Param('id', ParseDatabaseIdPipe) id: number,
   ) {
     return this.usersService.remove(id);
   }

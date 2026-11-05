@@ -1,3 +1,4 @@
+import { AgentsModule } from '../agents/agents.module.js';
 import { Module } from '@nestjs/common';
 
 import { TypeOrmModule } from '@nestjs/typeorm';
@@ -11,6 +12,7 @@ import { TasksController } from './tasks.controller.js';
 @Module({
   imports: [
     TypeOrmModule.forFeature([AgentTask]),
+    AgentsModule,
   ],
 
   controllers: [

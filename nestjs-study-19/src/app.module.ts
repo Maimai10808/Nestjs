@@ -1,4 +1,5 @@
-import { Module } from '@nestjs/common';
+import { APP_PIPE } from '@nestjs/core';
+import { Module, ValidationPipe } from '@nestjs/common';
 
 import {
   ConfigModule,
@@ -16,6 +17,10 @@ import { AgentsModule } from './agents/agents.module.js';
 import { TasksModule } from './tasks/tasks.module.js';
 
 @Module({
+  providers: [{
+    provide: APP_PIPE,
+    useValue: new ValidationPipe({ transform: true, whitelist: true, forbidNonWhitelisted: true }),
+  }],
   imports: [
     // 配置模块
     ConfigModule.forRoot({

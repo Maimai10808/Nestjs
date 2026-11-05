@@ -1,3 +1,4 @@
+import type { Relation } from 'typeorm';
 import {
   Entity,
   PrimaryGeneratedColumn,
@@ -36,7 +37,7 @@ export class Agent {
     onDelete: 'CASCADE',
   })
   @JoinColumn({ name: 'userId' })
-  user: User;
+  user: Relation<User>;
 
   @OneToMany(() => AgentTask, (task) => task.agent)
   tasks: AgentTask[];

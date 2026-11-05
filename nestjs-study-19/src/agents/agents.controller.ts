@@ -1,3 +1,6 @@
+import { ParseDatabaseIdPipe } from '../common/pipes/parse-database-id.pipe.js';
+import { CreateAgentDto } from './dto/create-agent.dto.js';
+import { UpdateAgentDto } from './dto/update-agent.dto.js';
 import {
   Controller,
   Get,
@@ -6,7 +9,6 @@ import {
   Delete,
   Param,
   Body,
-  ParseIntPipe,
 } from '@nestjs/common';
 
 import { AgentsService } from './agents.service.js';
@@ -26,7 +28,7 @@ export class AgentsController {
   // GET /agents/1
   @Get(':id')
   findOne(
-    @Param('id', ParseIntPipe) id: number,
+    @Param('id', ParseDatabaseIdPipe) id: number,
   ) {
     return this.agentsService.findOne(id);
   }
@@ -35,12 +37,7 @@ export class AgentsController {
   @Post()
   create(
     @Body()
-    body: {
-      name: string;
-      description: string;
-      model: string;
-      userId: number;
-    },
+    body: CreateAgentDto,
   ) {
     return this.agentsService.create(
       body.name,
@@ -53,14 +50,9 @@ export class AgentsController {
   // PATCH /agents/1
   @Patch(':id')
   update(
-    @Param('id', ParseIntPipe) id: number,
+    @Param('id', ParseDatabaseIdPipe) id: number,
     @Body()
-    body: {
-      name?: string;
-      description?: string;
-      model?: string;
-      enabled?: boolean;
-    },
+    body: UpdateAgentDto,
   ) {
     return this.agentsService.update(id, body);
   }
@@ -68,7 +60,7 @@ export class AgentsController {
   // DELETE /agents/1
   @Delete(':id')
   remove(
-    @Param('id', ParseIntPipe) id: number,
+    @Param('id', ParseDatabaseIdPipe) id: number,
   ) {
     return this.agentsService.remove(id);
   }
