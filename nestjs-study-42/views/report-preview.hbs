@@ -1,0 +1,29 @@
+<article class="report">
+  <h2>{{report.title}}</h2>
+
+  <p>{{report.description}}</p>
+
+  <div class="metadata">
+    <span>
+      AI Model：{{report.model}}
+    </span>
+
+    <span>
+      Status：{{report.status}}
+    </span>
+
+    <span>
+      Created：{{report.createdAt}}
+    </span>
+  </div>
+
+  <section>
+    <h3>研究内容</h3>
+
+    <pre>{{report.content}}</pre>
+  </section>
+
+  <a href="/reports">
+    返回报告列表
+  </a>
+</article>

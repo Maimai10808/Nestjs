@@ -1,0 +1,21 @@
+<section>
+  <h2>{{title}}</h2>
+
+  <div class="report-grid">
+    {{#each reports}}
+      <article class="report-card">
+        <h3>{{this.title}}</h3>
+
+        <p>{{this.description}}</p>
+
+        <p>
+          Model：{{this.model}}
+        </p>
+
+        <a href="/reports/{{this.id}}/preview">
+          查看报告
+        </a>
+      </article>
+    {{/each}}
+  </div>
+</section>
