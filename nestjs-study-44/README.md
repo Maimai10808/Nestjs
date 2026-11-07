@@ -1,132 +1,99 @@
-<p align="center">
-  <a href="http://nestjs.com/" target="blank"><img src="https://nestjs.com/img/logo-small.svg" width="120" alt="Nest Logo" /></a>
-</p>
+# NestJS Study 44：请求限流
 
-[circleci-image]: https://img.shields.io/circleci/build/github/nestjs/nest/master?token=abc123def456
-[circleci-url]: https://circleci.com/gh/nestjs/nest
+模拟模型目录、登录与研究任务，给不同成本的接口配置不同访问额度。研究任务仅等待 1 秒后返回假结果，项目不会调用真实付费模型。
 
-  <p align="center">A progressive <a href="http://nodejs.org" target="_blank">Node.js</a> framework for building efficient and scalable server-side applications.</p>
-    <p align="center">
-<a href="https://www.npmjs.com/~nestjscore" target="_blank"><img src="https://img.shields.io/npm/v/@nestjs/core.svg" alt="NPM Version" /></a>
-<a href="https://www.npmjs.com/~nestjscore" target="_blank"><img src="https://img.shields.io/npm/l/@nestjs/core.svg" alt="Package License" /></a>
-<a href="https://www.npmjs.com/~nestjscore" target="_blank"><img src="https://img.shields.io/npm/dm/@nestjs/common.svg" alt="NPM Downloads" /></a>
-<a href="https://circleci.com/gh/nestjs/nest" target="_blank"><img src="https://img.shields.io/circleci/build/github/nestjs/nest/master" alt="CircleCI" /></a>
-<a href="https://discord.gg/G7Qnnhy" target="_blank"><img src="https://img.shields.io/badge/discord-online-brightgreen.svg" alt="Discord"/></a>
-<a href="https://opencollective.com/nest#backer" target="_blank"><img src="https://opencollective.com/nest/backers/badge.svg" alt="Backers on Open Collective" /></a>
-<a href="https://opencollective.com/nest#sponsor" target="_blank"><img src="https://opencollective.com/nest/sponsors/badge.svg" alt="Sponsors on Open Collective" /></a>
-  <a href="https://paypal.me/kamilmysliwiec" target="_blank"><img src="https://img.shields.io/badge/Donate-PayPal-ff3f59.svg" alt="Donate us"/></a>
-    <a href="https://opencollective.com/nest#sponsor"  target="_blank"><img src="https://img.shields.io/badge/Support%20us-Open%20Collective-41B883.svg" alt="Support us"></a>
-  <a href="https://twitter.com/nestframework" target="_blank"><img src="https://img.shields.io/twitter/follow/nestframework.svg?style=social&label=Follow" alt="Follow us on Twitter"></a>
-</p>
-  <!--[![Backers on Open Collective](https://opencollective.com/nest/backers/badge.svg)](https://opencollective.com/nest#backer)
-  [![Sponsors on Open Collective](https://opencollective.com/nest/sponsors/badge.svg)](https://opencollective.com/nest#sponsor)-->
+## 核心知识
 
-## Description
+- `ThrottlerModule.forRoot()` 定义 `short`、`medium`、`long` 三个具名窗口，`ttl` 单位是毫秒。
+- `APP_GUARD` 全局注册 `ThrottlerGuard`，装饰器才会真正限制 HTTP 请求。
+- `@Throttle()` 覆盖指定路由的窗口额度，例如研究接口更严格。
+- `@SkipThrottle()` 必须逐个标明具名窗口；健康检查和显式 skip 接口均跳过三个窗口。
+- 默认以来源 IP 识别请求者，状态存在当前进程内存中。它不是用户配额、并发限制或持久化计费系统。
 
-[Nest](https://github.com/nestjs/nest) framework TypeScript starter repository.
+## 项目结构与阅读顺序
 
-## Project setup
-
-```bash
-$ pnpm install
+```text
+src/
+├── app.module.ts                     # 具名窗口和 APP_GUARD
+├── main.ts                           # DTO ValidationPipe
+├── rate-limit/rate-limit.controller.ts # info、严格 test、skip
+├── auth/auth.controller.ts           # 更严格的登录额度
+├── auth/auth.service.ts              # 固定凭据比较，不签发登录态
+├── agents/agents.controller.ts       # 研究接口覆盖额度
+├── agents/agents.service.ts          # 模拟研究
+├── models/models.controller.ts       # 全局默认额度
+└── health/health.controller.ts       # 全部窗口跳过
 ```
 
-## Compile and run the project
+推荐 `app.module.ts → rate-limit/rate-limit.controller.ts → auth/auth.controller.ts → agents/agents.controller.ts → main.ts → test/app.e2e-spec.ts`。先了解默认规则，再比较覆盖与跳过。
 
-```bash
-# development
-$ pnpm run start
+## 核心执行流程
 
-# watch mode
-$ pnpm run start:dev
-
-# production mode
-$ pnpm run start:prod
+```mermaid
+flowchart TD
+  A[HTTP 请求] --> B[ThrottlerGuard 读取具名窗口与元数据]
+  B --> C{达到任一额度?}
+  C -->|是| D[429 + Retry-After-short 等具名 Header]
+  C -->|否| E[DTO 校验]
+  E --> F[Controller 与模拟业务]
+  F --> G[返回响应和限流 Header]
 ```
 
-## Run tests
+研究接口为 1 次/秒、5 次/10 秒、10 次/分钟；登录接口为 2 次/秒、3 次/10 秒、5 次/分钟。额度按路由与窗口分别跟踪，不是“整个服务一分钟只能访问十次”。快速重复研究请求会在 Guard 阶段被拒绝，不必等待模拟任务完成。
+
+当前参数直接写在 `app.module.ts` 和路由装饰器中；虽然项目安装了 ConfigModule，`THROTTLE_*` 环境变量不会改变这些规则。修改额度应阅读这些真实配置位置。
+
+## 启动与接口
+
+需要 Node.js 24、pnpm；NestJS 12、`@nestjs/throttler` 6.x、TypeScript 6。不需要 `.env`、Redis、数据库或模型 Key。
 
 ```bash
-# unit tests
-$ pnpm run test
-
-# e2e tests
-$ pnpm run test:e2e
-
-# test coverage
-$ pnpm run test:cov
+pnpm install --frozen-lockfile
+pnpm start:dev
 ```
 
-## Deployment
+`PORT` 默认 3000。不要在演示前对同一路由反复压测，否则已有计数会影响观察；重启可清空教学内存状态。
 
-When you're ready to deploy your NestJS application to production, there are some key steps you can take to ensure it runs as efficiently as possible. Check out the [deployment documentation](https://docs.nestjs.com/deployment) for more information.
-
-If you are looking for a cloud-based platform to deploy your NestJS application, check out [Mau](https://mau.nestjs.com), our official platform for deploying NestJS applications on AWS. Mau makes deployment straightforward and fast, requiring just a few simple steps:
+| Method | 路由 | 行为 |
+|---|---|---|
+| GET | `/rate-limit/info` | 展示全局默认额度 |
+| GET | `/rate-limit/test` | 严格额度：1/秒、3/10秒、5/分钟 |
+| GET | `/rate-limit/skip` | 跳过所有具名窗口 |
+| GET | `/health` | 健康检查，不限流 |
+| POST | `/auth/login` | 固定凭据比较，200，无 Token/Session |
+| GET | `/agents` | Agent 目录 |
+| GET | `/agents/:id` | Agent 详情，缺失 404 |
+| POST | `/agents/research` | 校验 topic 后模拟研究 |
+| GET | `/models` | 模型目录 |
 
 ```bash
-$ pnpm install -g @nestjs/mau
-$ mau deploy
+curl -i http://localhost:3000/rate-limit/test
+curl -i http://localhost:3000/rate-limit/test
+curl -i http://localhost:3000/health
+curl -i http://localhost:3000/rate-limit/skip
+curl -i -X POST http://localhost:3000/agents/research \
+  -H 'Content-Type: application/json' -d '{"topic":"NestJS Agent architecture"}'
+curl -i http://localhost:3000/auth/login -H 'Content-Type: application/json' \
+  -d '{"username":"robin","password":"Robin123456!"}'
 ```
 
-With Mau, you can deploy your application in just a few clicks, allowing you to focus on building features rather than managing infrastructure.
-
-## Observability
-
-In production applications, observability is essential for understanding how your system behaves, detecting issues early, and maintaining reliable performance.
-
-[NestJS Observe](https://observe.nestjs.com) automatically instruments your NestJS application, giving you deep visibility into your system with minimal setup:
-
-- **Distributed tracing:** Follow requests across services and understand how they flow through your system.
-- **Waterfall analysis:** Visualize request execution and identify slow operations, bottlenecks, and unexpected delays.
-- **Performance analysis:** Analyze application performance in real time and quickly pinpoint areas that need optimization.
-- **Metrics:** Track key application and infrastructure metrics to understand system health and performance trends.
-- **Logging:** Centralize and correlate logs with traces and other telemetry to make debugging easier.
-- **Error tracking:** Detect errors quickly and investigate their root causes with the surrounding context.
-- **SLA monitoring:** Track service-level objectives and identify when your application is approaching or exceeding defined thresholds.
-- **Alarms and alerts:** Set up alerts for critical errors, performance degradation, SLA violations, and other anomalies so your team can react quickly.
-
-To add it to this project, run this and approve the code it prints at [observe.nestjs.com/link](https://observe.nestjs.com/link) - signing up for free if you have no account:
+前两条要在 1 秒内执行，第二次返回 429，并带具名 `Retry-After-short`（秒）。健康检查与 skip 仍为 200。研究参数 topic 必须是 3～200 字符的字符串。登录返回固定教学用户资料，并未建立身份认证，不能把“登录成功”用于保护其他接口。
 
 ```bash
-$ npx @nestjs/observe link
+pnpm exec tsc --noEmit --incremental false
+pnpm lint
+pnpm test
+pnpm test:e2e
+pnpm build
+pnpm start:prod
 ```
 
-It installs `@nestjs/observe`, wires it into `AppModule` and `main.ts`, and writes the app key and secret into `.env`, which every `nest start` script (`start`, `start:dev`, `start:debug`) then loads. In production, set `OBSERVE_APP_KEY` and `OBSERVE_APP_SECRET` in the environment instead.
+HTTP E2E 验证实际 429、恢复时间 Header、健康检查跳过、研究参数 400 与登录模拟边界。它不是吞吐量基准测试。
 
-Or do it by hand:
+## 限制、练习与总结
 
-```bash
-$ pnpm install @nestjs/observe
-```
+默认内存计数无法跨实例共享。生产中代理配置必须与真实拓扑匹配，不能盲目信任客户端 `X-Forwarded-For`；按用户限额需要先建立可信身份，再选择 tracker。限流也不能自动取消已在执行的任务或限制全部后台并发。
 
-Then follow the [setup guide](https://docs.nestjs.com/observability/sdk) - it takes a single import and an app key.
+练习：调整一个窗口观察 429；给模型目录设置独立额度；对比健康检查与普通接口 Header。重点掌握全局注册、路由覆盖和具名跳过的关系。
 
-The free plan needs no payment details and covers 300,000 events a month. You can also browse the [live demo](https://www.observe-demo.nestjs.com/dashboard) first - the whole dashboard over a busy service's data, with nothing to install.
-
-## Resources
-
-Check out a few resources that may come in handy when working with NestJS:
-
-- Visit the [NestJS Documentation](https://docs.nestjs.com) to learn more about the framework.
-- For questions and support, please visit our [Discord channel](https://discord.gg/G7Qnnhy).
-- To dive deeper and get more hands-on experience, check out our official video [courses](https://courses.nestjs.com/).
-- Deploy your application to AWS with the help of [NestJS Mau](https://mau.nestjs.com) in just a few clicks.
-- Auto-instrument your application with [NestJS Observe](https://observe.nestjs.com). Distributed tracing, metrics, and logging made easy. Error tracking and performance monitoring for your NestJS applications.
-- Visualize your application graph and interact with the NestJS application in real-time using [NestJS Devtools](https://devtools.nestjs.com).
-- Need help with your project (part-time to full-time)? Check out our official [enterprise support](https://enterprise.nestjs.com).
-- To stay in the loop and get updates, follow us on [X](https://x.com/nestframework) and [LinkedIn](https://linkedin.com/company/nestjs).
-- Looking for a job, or have a job to offer? Check out our official [Jobs board](https://jobs.nestjs.com).
-
-## Support
-
-Nest is an MIT-licensed open source project. It can grow thanks to the sponsors and support by the amazing backers. If you'd like to join them, please [read more here](https://docs.nestjs.com/support).
-
-## Stay in touch
-
-- Author - [Kamil Myśliwiec](https://twitter.com/kammysliwiec)
-- Website - [https://nestjs.com](https://nestjs.com/)
-- Twitter - [@nestframework](https://twitter.com/nestframework)
-
-## License
-
-Nest is [MIT licensed](https://github.com/nestjs/nest/blob/master/LICENSE).
+参考：[中文限流文档](https://docs.nestjs.cn/security/rate-limiting/)、[官方限流文档](https://docs.nestjs.com/security/rate-limiting)。
