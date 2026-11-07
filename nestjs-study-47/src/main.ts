@@ -28,6 +28,8 @@ async function bootstrap() {
     process.env.PORT ?? 3000,
   );
 
+  app.enableShutdownHooks();
+
   await app.listen(port);
 
   console.log(

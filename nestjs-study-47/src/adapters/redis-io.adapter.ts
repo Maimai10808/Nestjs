@@ -1,4 +1,5 @@
 import { IoAdapter } from '@nestjs/platform-socket.io';
+import { Logger } from '@nestjs/common';
 
 import type {
   INestApplicationContext,
@@ -19,12 +20,14 @@ import type {
 } from 'socket.io';
 
 export class RedisIoAdapter extends IoAdapter {
+  private readonly redisLogger = new Logger(RedisIoAdapter.name);
   private adapterConstructor?:
     ReturnType<typeof createAdapter>;
 
   private pubClient?: RedisClientType;
 
   private subClient?: RedisClientType;
+  private closing = false;
 
   constructor(
     app: INestApplicationContext,
@@ -37,9 +40,16 @@ export class RedisIoAdapter extends IoAdapter {
   ): Promise<void> {
     const pubClient = createClient({
       url: redisUrl,
+      socket: { connectTimeout: 5000 },
     });
 
     const subClient = pubClient.duplicate();
+
+    for (const [name, client] of [['publisher', pubClient], ['subscriber', subClient]] as const) {
+      client.on('error', (error: Error) => {
+        this.redisLogger.error(`Redis ${name}: ${error.message}`);
+      });
+    }
 
     try {
       await Promise.all([
@@ -47,16 +57,25 @@ export class RedisIoAdapter extends IoAdapter {
         subClient.connect(),
       ]);
     } catch (error) {
-      await Promise.allSettled([
-        pubClient.quit(),
-        subClient.quit(),
-      ]);
+      for (const client of [pubClient, subClient]) {
+        if (client.isOpen) client.destroy();
+      }
 
       throw error;
     }
 
     this.pubClient = pubClient;
     this.subClient = subClient;
+
+    // redis-adapter 8.3 不等待这些命令；观察拒绝，同时保留原 Promise 的结果。
+    const pSubscribe = subClient.pSubscribe.bind(subClient);
+    subClient.pSubscribe = (...args) => this.observeCommand(pSubscribe(...args));
+    const subscribe = subClient.subscribe.bind(subClient);
+    subClient.subscribe = (...args) => this.observeCommand(subscribe(...args));
+    const pUnsubscribe = subClient.pUnsubscribe.bind(subClient);
+    subClient.pUnsubscribe = (...args) => this.observeCommand(pUnsubscribe(...args));
+    const unsubscribe = subClient.unsubscribe.bind(subClient);
+    subClient.unsubscribe = (...args) => this.observeCommand(unsubscribe(...args));
 
     this.adapterConstructor = createAdapter(
       pubClient,
@@ -86,10 +105,27 @@ export class RedisIoAdapter extends IoAdapter {
     return server;
   }
 
-  async closeRedis(): Promise<void> {
-    await Promise.allSettled([
-      this.pubClient?.quit(),
-      this.subClient?.quit(),
-    ]);
+  override dispose(): Promise<void> {
+    return this.closeRedis();
+  }
+
+  closeRedis(): Promise<void> {
+    this.closing = true;
+    // Pub/sub 不保存业务写入；销毁连接不需要等待失联服务回复 QUIT。
+    for (const client of [this.pubClient, this.subClient]) {
+      if (client?.isOpen) client.destroy();
+    }
+    this.pubClient = undefined;
+    this.subClient = undefined;
+    return Promise.resolve();
+  }
+
+  private observeCommand<T>(pending: Promise<T>): Promise<T> {
+    void pending.catch((error: unknown) => {
+      if (!this.closing) {
+        this.redisLogger.error(error instanceof Error ? error.message : String(error));
+      }
+    });
+    return pending;
   }
 }

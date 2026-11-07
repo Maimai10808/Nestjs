@@ -1,4 +1,5 @@
-import { Injectable } from '@nestjs/common';
+import { Injectable, type OnModuleDestroy } from '@nestjs/common';
+import { setTimeout as delay } from 'node:timers/promises';
 
 import type {
   ResearchProgress,
@@ -6,7 +7,12 @@ import type {
 } from './agent.interface.js';
 
 @Injectable()
-export class AgentsService {
+export class AgentsService implements OnModuleDestroy {
+  private readonly shutdown = new AbortController();
+
+  onModuleDestroy(): void {
+    this.shutdown.abort();
+  }
   private readonly stages: Array<{
     stage: ResearchStage;
     progress: number;
@@ -45,18 +51,21 @@ export class AgentsService {
       progress: ResearchProgress,
     ) => void,
   ): Promise<void> {
-    for (const item of this.stages) {
-      await new Promise<void>((resolve) => {
-        setTimeout(resolve, 1000);
-      });
+    try {
+      for (const item of this.stages) {
+        await delay(1000, undefined, { signal: this.shutdown.signal });
+        if (this.shutdown.signal.aborted) return;
 
-      onProgress({
-        taskId,
-        stage: item.stage,
-        progress: item.progress,
-        message: item.message,
-        timestamp: new Date().toISOString(),
-      });
+        onProgress({
+          taskId,
+          stage: item.stage,
+          progress: item.progress,
+          message: item.message,
+          timestamp: new Date().toISOString(),
+        });
+      }
+    } catch (error) {
+      if (!this.shutdown.signal.aborted) throw error;
     }
   }
 }
