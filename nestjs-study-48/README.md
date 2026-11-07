@@ -1,132 +1,120 @@
-<p align="center">
-  <a href="http://nestjs.com/" target="blank"><img src="https://nestjs.com/img/logo-small.svg" width="120" alt="Nest Logo" /></a>
-</p>
+# NestJS Study 48：TCP 微服务与共享消息契约
 
-[circleci-image]: https://img.shields.io/circleci/build/github/nestjs/nest/master?token=abc123def456
-[circleci-url]: https://circleci.com/gh/nestjs/nest
+本章在一个独立 Study 内保留两个 Nest 应用：HTTP API 接收研究请求，Agent Worker 用 Nest TCP Transport 执行模拟研究。无需 Redis、RabbitMQ、数据库或真实模型账户。
 
-  <p align="center">A progressive <a href="http://nodejs.org" target="_blank">Node.js</a> framework for building efficient and scalable server-side applications.</p>
-    <p align="center">
-<a href="https://www.npmjs.com/~nestjscore" target="_blank"><img src="https://img.shields.io/npm/v/@nestjs/core.svg" alt="NPM Version" /></a>
-<a href="https://www.npmjs.com/~nestjscore" target="_blank"><img src="https://img.shields.io/npm/l/@nestjs/core.svg" alt="Package License" /></a>
-<a href="https://www.npmjs.com/~nestjscore" target="_blank"><img src="https://img.shields.io/npm/dm/@nestjs/common.svg" alt="NPM Downloads" /></a>
-<a href="https://circleci.com/gh/nestjs/nest" target="_blank"><img src="https://img.shields.io/circleci/build/github/nestjs/nest/master" alt="CircleCI" /></a>
-<a href="https://discord.gg/G7Qnnhy" target="_blank"><img src="https://img.shields.io/badge/discord-online-brightgreen.svg" alt="Discord"/></a>
-<a href="https://opencollective.com/nest#backer" target="_blank"><img src="https://opencollective.com/nest/backers/badge.svg" alt="Backers on Open Collective" /></a>
-<a href="https://opencollective.com/nest#sponsor" target="_blank"><img src="https://opencollective.com/nest/sponsors/badge.svg" alt="Sponsors on Open Collective" /></a>
-  <a href="https://paypal.me/kamilmysliwiec" target="_blank"><img src="https://img.shields.io/badge/Donate-PayPal-ff3f59.svg" alt="Donate us"/></a>
-    <a href="https://opencollective.com/nest#sponsor"  target="_blank"><img src="https://img.shields.io/badge/Support%20us-Open%20Collective-41B883.svg" alt="Support us"></a>
-  <a href="https://twitter.com/nestframework" target="_blank"><img src="https://img.shields.io/twitter/follow/nestframework.svg?style=social&label=Follow" alt="Follow us on Twitter"></a>
-</p>
-  <!--[![Backers on Open Collective](https://opencollective.com/nest/backers/badge.svg)](https://opencollective.com/nest#backer)
-  [![Sponsors on Open Collective](https://opencollective.com/nest/sponsors/badge.svg)](https://opencollective.com/nest#sponsor)-->
+## 学习目标
 
-## Description
+- 区分 HTTP Controller 和微服务的 `@MessagePattern()`、`@EventPattern()`。
+- 用 `ClientProxy.send()` 建立请求响应，用 `emit()` 发布事件。
+- 理解 Observable 订阅、`firstValueFrom()` 和调用方超时之间的关系。
+- 在同一个教学项目中共用 TypeScript 契约，避免消息名称两边拼写不一致。
 
-[Nest](https://github.com/nestjs/nest) framework TypeScript starter repository.
+## 项目结构
 
-## Project setup
-
-```bash
-$ pnpm install
+```text
+apps/
+├── api/
+│   ├── src/main.ts
+│   ├── src/app.module.ts
+│   └── src/research/
+│       ├── research.controller.ts
+│       ├── research.service.ts
+│       ├── research.module.ts
+│       └── dto/research.dto.ts
+└── agent-worker/
+    ├── src/main.ts
+    ├── src/agent-worker.module.ts
+    └── src/research/
+        ├── research.controller.ts
+        ├── research.service.ts
+        └── research.module.ts
+libs/contracts/src/
+├── index.ts
+└── research.contract.ts
 ```
 
-## Compile and run the project
+推荐从 [消息契约](./libs/contracts/src/research.contract.ts) 开始，再读 API 的 [ClientsModule 注册](./apps/api/src/research/research.module.ts) 和 [Service](./apps/api/src/research/research.service.ts)，最后读 Worker 的 [入口](./apps/agent-worker/src/main.ts)、Controller 与 Service。返回查看两个 `tsconfig.app.json`，理解为何编译输出包含 apps 和 libs 的目录层级。
 
-```bash
-# development
-$ pnpm run start
+## 核心实现
 
-# watch mode
-$ pnpm run start:dev
-
-# production mode
-$ pnpm run start:prod
+```mermaid
+flowchart LR
+    A[HTTP 客户端] --> B[API Controller / DTO 验证]
+    B --> C[API ResearchService]
+    C -->|send + firstValueFrom| D[TCP Worker MessagePattern]
+    D --> E[模拟研究并返回结果]
+    E --> A
+    C -->|emit| F[Worker EventPattern 记录事件]
 ```
 
-## Run tests
+`send()` 返回冷 Observable，只有被订阅才会发送。API 使用 `firstValueFrom()` 订阅并等待首个结果。Worker `analyze()` 延迟约 1.5 秒后返回报告摘要；没有执行真实检索和模型推理。
+
+`emit()` 用于提交事件，HTTP 响应表示传输发布完成，不能据此推断研究任务已经完成或事件获得持久化。本例事件处理器只记录日志。
+
+API 为分析请求设置 5 秒超时、模型查询设置 3 秒超时、慢任务设置 2 秒超时。慢任务 Worker 本身等待 10 秒，因此返回 504 是预期演示。**调用方停止等待不会自动取消 Worker 内部的 Promise 或定时器**。
+
+## 安装与启动
+
+Node.js 24、pnpm 12，NestJS 12.3.3、TypeScript 6。两应用均只绑定本机地址。
 
 ```bash
-# unit tests
-$ pnpm run test
-
-# e2e tests
-$ pnpm run test:e2e
-
-# test coverage
-$ pnpm run test:cov
+pnpm install --frozen-lockfile
+pnpm build
 ```
 
-## Deployment
+构建脚本依次构建 api 与 agent-worker。现有 TypeScript builder 保留相对目录和共享 contracts，真实生产入口如下。
 
-When you're ready to deploy your NestJS application to production, there are some key steps you can take to ensure it runs as efficiently as possible. Check out the [deployment documentation](https://docs.nestjs.com/deployment) for more information.
-
-If you are looking for a cloud-based platform to deploy your NestJS application, check out [Mau](https://mau.nestjs.com), our official platform for deploying NestJS applications on AWS. Mau makes deployment straightforward and fast, requiring just a few simple steps:
+终端 A 启动 Worker：
 
 ```bash
-$ pnpm install -g @nestjs/mau
-$ mau deploy
+WORKER_TCP_PORT=4001 node dist/agent-worker/apps/agent-worker/src/main.js
 ```
 
-With Mau, you can deploy your application in just a few clicks, allowing you to focus on building features rather than managing infrastructure.
-
-## Observability
-
-In production applications, observability is essential for understanding how your system behaves, detecting issues early, and maintaining reliable performance.
-
-[NestJS Observe](https://observe.nestjs.com) automatically instruments your NestJS application, giving you deep visibility into your system with minimal setup:
-
-- **Distributed tracing:** Follow requests across services and understand how they flow through your system.
-- **Waterfall analysis:** Visualize request execution and identify slow operations, bottlenecks, and unexpected delays.
-- **Performance analysis:** Analyze application performance in real time and quickly pinpoint areas that need optimization.
-- **Metrics:** Track key application and infrastructure metrics to understand system health and performance trends.
-- **Logging:** Centralize and correlate logs with traces and other telemetry to make debugging easier.
-- **Error tracking:** Detect errors quickly and investigate their root causes with the surrounding context.
-- **SLA monitoring:** Track service-level objectives and identify when your application is approaching or exceeding defined thresholds.
-- **Alarms and alerts:** Set up alerts for critical errors, performance degradation, SLA violations, and other anomalies so your team can react quickly.
-
-To add it to this project, run this and approve the code it prints at [observe.nestjs.com/link](https://observe.nestjs.com/link) - signing up for free if you have no account:
+终端 B 启动 API：
 
 ```bash
-$ npx @nestjs/observe link
+PORT=3000 WORKER_TCP_PORT=4001 pnpm start:prod
 ```
 
-It installs `@nestjs/observe`, wires it into `AppModule` and `main.ts`, and writes the app key and secret into `.env`, which every `nest start` script (`start`, `start:dev`, `start:debug`) then loads. In production, set `OBSERVE_APP_KEY` and `OBSERVE_APP_SECRET` in the environment instead.
+也可以分别运行 `pnpm exec nest start agent-worker --watch` 和 `pnpm exec nest start api --watch`。不要将整个仓库当成一个 Nest monorepo；只有本 Study 内部包含这两个应用。
 
-Or do it by hand:
+## HTTP 接口与验证
+
+| 方法 | 路径 | 作用 |
+| --- | --- | --- |
+| POST | `/research/analyze` | 通过 TCP 获取模拟研究结果 |
+| POST | `/research/submit` | 发布研究提交事件，只记录日志 |
+| GET | `/research/models` | 通过 TCP 获取两个模型标签 |
+| GET | `/research/slow` | 演示超时，预期 504 |
 
 ```bash
-$ pnpm install @nestjs/observe
+curl -X POST http://localhost:3000/research/analyze \
+  -H 'Content-Type: application/json' \
+  -d '{"topic":"NestJS Agent 架构","model":"gpt-4.1"}'
+curl http://localhost:3000/research/models
+curl -X POST http://localhost:3000/research/submit \
+  -H 'Content-Type: application/json' \
+  -d '{"topic":"事件驱动研究","model":"claude-sonnet"}'
+curl -i http://localhost:3000/research/slow
 ```
 
-Then follow the [setup guide](https://docs.nestjs.com/observability/sdk) - it takes a single import and an app key.
+topic 必须为 3～200 字符；model 只能使用表中的两个标签；额外字段会被拒绝。`submit` 沿用同一 DTO，因此也需要 model 字段，虽然事件内容只使用 topic。
 
-The free plan needs no payment details and covers 300,000 events a month. You can also browse the [live demo](https://www.observe-demo.nestjs.com/dashboard) first - the whole dashboard over a busy service's data, with nothing to install.
+```bash
+pnpm exec tsc --noEmit --incremental false
+pnpm lint
+pnpm test
+pnpm test:e2e
+```
 
-## Resources
+E2E 启动真实本机 TCP Worker 和 HTTP API，验证请求结果、参数拒绝、模型查询、事件到达和超时；独立 Worker 测试还直接发送 TCP 模型请求。关闭 API 时 ClientsModule 负责关闭 ClientProxy。
 
-Check out a few resources that may come in handy when working with NestJS:
+## 限制、练习与总结
 
-- Visit the [NestJS Documentation](https://docs.nestjs.com) to learn more about the framework.
-- For questions and support, please visit our [Discord channel](https://discord.gg/G7Qnnhy).
-- To dive deeper and get more hands-on experience, check out our official video [courses](https://courses.nestjs.com/).
-- Deploy your application to AWS with the help of [NestJS Mau](https://mau.nestjs.com) in just a few clicks.
-- Auto-instrument your application with [NestJS Observe](https://observe.nestjs.com). Distributed tracing, metrics, and logging made easy. Error tracking and performance monitoring for your NestJS applications.
-- Visualize your application graph and interact with the NestJS application in real-time using [NestJS Devtools](https://devtools.nestjs.com).
-- Need help with your project (part-time to full-time)? Check out our official [enterprise support](https://enterprise.nestjs.com).
-- To stay in the loop and get updates, follow us on [X](https://x.com/nestframework) and [LinkedIn](https://linkedin.com/company/nestjs).
-- Looking for a job, or have a job to offer? Check out our official [Jobs board](https://jobs.nestjs.com).
+TCP 端口仅用于受信任的本机演示，没有服务间认证、TLS、持久消息、重试和任务幂等。TypeScript Interface 只提供编译期约束；不能把它当成 Worker 的运行时入站验证。API 的 DTO 保护本例 HTTP 入口，若公开 TCP 端口，需要另行定义信任与校验边界。
 
-## Support
+练习：新增一个消息 Pattern 并在两端实现；停掉 Worker 观察分析和模型请求的 503；修改慢任务超时后比较结果；解释为什么事件发布成功不等于任务完成。
 
-Nest is an MIT-licensed open source project. It can grow thanks to the sponsors and support by the amazing backers. If you'd like to join them, please [read more here](https://docs.nestjs.com/support).
+本章通过两进程通信建立微服务基本模型，不要求引入消息中间件。之后的部署章节关注如何打包、健康检查和退出已有服务。
 
-## Stay in touch
-
-- Author - [Kamil Myśliwiec](https://twitter.com/kammysliwiec)
-- Website - [https://nestjs.com](https://nestjs.com/)
-- Twitter - [@nestframework](https://twitter.com/nestframework)
-
-## License
-
-Nest is [MIT licensed](https://github.com/nestjs/nest/blob/master/LICENSE).
+参考：[NestJS Microservices Basics](https://docs.nestjs.com/microservices/basics)。
