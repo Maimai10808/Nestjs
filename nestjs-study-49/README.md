@@ -1,132 +1,125 @@
-<p align="center">
-  <a href="http://nestjs.com/" target="blank"><img src="https://nestjs.com/img/logo-small.svg" width="120" alt="Nest Logo" /></a>
-</p>
+# NestJS Study 49：部署、健康检查与优雅退出
 
-[circleci-image]: https://img.shields.io/circleci/build/github/nestjs/nest/master?token=abc123def456
-[circleci-url]: https://circleci.com/gh/nestjs/nest
+本章将一个内存版 AI Research HTTP 服务打包为 Docker 镜像，使用 Nginx 转发请求，并用 Terminus 暴露健康状态。研究任务由定时器模拟，重点是服务运行与退出的工程边界，没有真正调用模型。
 
-  <p align="center">A progressive <a href="http://nodejs.org" target="_blank">Node.js</a> framework for building efficient and scalable server-side applications.</p>
-    <p align="center">
-<a href="https://www.npmjs.com/~nestjscore" target="_blank"><img src="https://img.shields.io/npm/v/@nestjs/core.svg" alt="NPM Version" /></a>
-<a href="https://www.npmjs.com/~nestjscore" target="_blank"><img src="https://img.shields.io/npm/l/@nestjs/core.svg" alt="Package License" /></a>
-<a href="https://www.npmjs.com/~nestjscore" target="_blank"><img src="https://img.shields.io/npm/dm/@nestjs/common.svg" alt="NPM Downloads" /></a>
-<a href="https://circleci.com/gh/nestjs/nest" target="_blank"><img src="https://img.shields.io/circleci/build/github/nestjs/nest/master" alt="CircleCI" /></a>
-<a href="https://discord.gg/G7Qnnhy" target="_blank"><img src="https://img.shields.io/badge/discord-online-brightgreen.svg" alt="Discord"/></a>
-<a href="https://opencollective.com/nest#backer" target="_blank"><img src="https://opencollective.com/nest/backers/badge.svg" alt="Backers on Open Collective" /></a>
-<a href="https://opencollective.com/nest#sponsor" target="_blank"><img src="https://opencollective.com/nest/sponsors/badge.svg" alt="Sponsors on Open Collective" /></a>
-  <a href="https://paypal.me/kamilmysliwiec" target="_blank"><img src="https://img.shields.io/badge/Donate-PayPal-ff3f59.svg" alt="Donate us"/></a>
-    <a href="https://opencollective.com/nest#sponsor"  target="_blank"><img src="https://img.shields.io/badge/Support%20us-Open%20Collective-41B883.svg" alt="Support us"></a>
-  <a href="https://twitter.com/nestframework" target="_blank"><img src="https://img.shields.io/twitter/follow/nestframework.svg?style=social&label=Follow" alt="Follow us on Twitter"></a>
-</p>
-  <!--[![Backers on Open Collective](https://opencollective.com/nest/backers/badge.svg)](https://opencollective.com/nest#backer)
-  [![Sponsors on Open Collective](https://opencollective.com/nest/sponsors/badge.svg)](https://opencollective.com/nest#sponsor)-->
+## 学习目标
 
-## Description
+- 从 TypeScript 源码构建 `dist`，运行时只携带生产依赖。
+- 用 Compose 组织 API 与 Nginx，用健康检查决定代理何时启动。
+- 区分“进程在线”“当前堆内存正常”和“业务服务完整健康”。
+- 用 Nest 关闭钩子等待已接收的模拟任务，而不是突然终止执行。
 
-[Nest](https://github.com/nestjs/nest) framework TypeScript starter repository.
+## 结构与推荐阅读顺序
 
-## Project setup
-
-```bash
-$ pnpm install
+```text
+src/
+├── main.ts
+├── app.module.ts
+├── health/
+│   ├── health.controller.ts
+│   └── health.module.ts
+└── research/
+    ├── research.controller.ts
+    ├── research.service.ts
+    ├── research.interface.ts
+    ├── research.module.ts
+    └── dto/create-research.dto.ts
+Dockerfile
+compose.yaml
+deploy/nginx/default.conf
+.env.example
+.dockerignore
 ```
 
-## Compile and run the project
+先读 [main.ts](./src/main.ts) 的监听地址、ValidationPipe 和 shutdown hooks；再读 [ResearchService](./src/research/research.service.ts) 的任务及退出等待；随后读 [HealthController](./src/health/health.controller.ts)，最后对照 Dockerfile、Compose 和 Nginx 配置。
 
-```bash
-# development
-$ pnpm run start
+## 服务如何运行
 
-# watch mode
-$ pnpm run start:dev
-
-# production mode
-$ pnpm run start:prod
+```mermaid
+flowchart LR
+    A[客户端 localhost:8080] --> B[Nginx]
+    B --> C[API :3000]
+    C --> D[内存 ResearchService]
+    C --> E[Terminus 内存健康检查]
+    F[停止信号] --> G[Nest 关闭钩子]
+    G --> H[等待已接收的模拟执行]
 ```
 
-## Run tests
+[ResearchController](./src/research/research.controller.ts) 接收输入和查询，Service 保存任务并逐步更新进度。创建响应通常已经是 `running`，约四秒后变为 `completed`。`onModuleDestroy()` 等待本进程已接收的执行 Promise；Service 进入关闭状态后拒绝新建任务并返回 503，避免排空期间又加入未等待的执行。
+
+健康检查仅调用 `MemoryHealthIndicator.checkHeap()`，阈值为 512 MiB。它没有检查数据库、Redis、模型 API，也不是业务任务成功率监控。
+
+Dockerfile 使用 Node.js 24，构建阶段安装锁定依赖、编译并保留生产依赖；运行阶段以 `node` 用户执行 `dist/main.js`。`.dockerignore` 排除本机 node_modules、dist、日志和 `.env`，不会将本地环境文件带进镜像。
+
+## 本机运行
+
+要求 Node.js 24、pnpm 12。锁文件使用 NestJS 12.3.3。
 
 ```bash
-# unit tests
-$ pnpm run test
-
-# e2e tests
-$ pnpm run test:e2e
-
-# test coverage
-$ pnpm run test:cov
+pnpm install --frozen-lockfile
+cp .env.example .env
+pnpm start:dev
 ```
 
-## Deployment
-
-When you're ready to deploy your NestJS application to production, there are some key steps you can take to ensure it runs as efficiently as possible. Check out the [deployment documentation](https://docs.nestjs.com/deployment) for more information.
-
-If you are looking for a cloud-based platform to deploy your NestJS application, check out [Mau](https://mau.nestjs.com), our official platform for deploying NestJS applications on AWS. Mau makes deployment straightforward and fast, requiring just a few simple steps:
+环境变量只有 `NODE_ENV` 和 `PORT`；默认 3000。没有数据库和 API Key。生产构建后可以直接运行：
 
 ```bash
-$ pnpm install -g @nestjs/mau
-$ mau deploy
+pnpm build
+pnpm start:prod
 ```
 
-With Mau, you can deploy your application in just a few clicks, allowing you to focus on building features rather than managing infrastructure.
+## 容器运行
 
-## Observability
-
-In production applications, observability is essential for understanding how your system behaves, detecting issues early, and maintaining reliable performance.
-
-[NestJS Observe](https://observe.nestjs.com) automatically instruments your NestJS application, giving you deep visibility into your system with minimal setup:
-
-- **Distributed tracing:** Follow requests across services and understand how they flow through your system.
-- **Waterfall analysis:** Visualize request execution and identify slow operations, bottlenecks, and unexpected delays.
-- **Performance analysis:** Analyze application performance in real time and quickly pinpoint areas that need optimization.
-- **Metrics:** Track key application and infrastructure metrics to understand system health and performance trends.
-- **Logging:** Centralize and correlate logs with traces and other telemetry to make debugging easier.
-- **Error tracking:** Detect errors quickly and investigate their root causes with the surrounding context.
-- **SLA monitoring:** Track service-level objectives and identify when your application is approaching or exceeding defined thresholds.
-- **Alarms and alerts:** Set up alerts for critical errors, performance degradation, SLA violations, and other anomalies so your team can react quickly.
-
-To add it to this project, run this and approve the code it prints at [observe.nestjs.com/link](https://observe.nestjs.com/link) - signing up for free if you have no account:
+安装并启动 Docker 后执行：
 
 ```bash
-$ npx @nestjs/observe link
+docker compose build
+docker compose up -d
+curl http://localhost:8080/health
+docker compose logs api
+docker compose down
 ```
 
-It installs `@nestjs/observe`, wires it into `AppModule` and `main.ts`, and writes the app key and secret into `.env`, which every `nest start` script (`start`, `start:dev`, `start:debug`) then loads. In production, set `OBSERVE_APP_KEY` and `OBSERVE_APP_SECRET` in the environment instead.
+Compose 内 API 只 expose 3000，Nginx 向宿主机开放 8080。Nginx 配置中的 `api:3000` 来自 Compose 服务名，不是宿主机地址。容器 healthcheck 用 Node 的 fetch 调用 `/health`；Nginx 在 API 首次健康后启动。`depends_on` 不提供运行期间自动故障转移。
 
-Or do it by hand:
+构建需要获取 Node 镜像和依赖包。网络失败属于环境阻塞，不意味着已经完成容器运行验收；根目录最终审查报告分别记录本机与容器验证结果。本例不包含云端发布或真实生产部署。
+
+## API 与验证
+
+| 方法 | 路径 | 功能 |
+| --- | --- | --- |
+| GET | `/health` | 当前堆内存健康检查 |
+| POST | `/research` | 创建模拟研究任务 |
+| GET | `/research` | 列出本进程任务 |
+| GET | `/research/:id` | 查询任务，不存在返回 404 |
+
+以下使用本机直连端口；容器运行时把 3000 换成 8080。
 
 ```bash
-$ pnpm install @nestjs/observe
+curl http://localhost:3000/health
+curl -X POST http://localhost:3000/research \
+  -H 'Content-Type: application/json' \
+  -d '{"topic":"NestJS 的部署和关闭流程","model":"gpt-4.1"}'
+curl http://localhost:3000/research
 ```
 
-Then follow the [setup guide](https://docs.nestjs.com/observability/sdk) - it takes a single import and an app key.
+复制创建响应的 id，再请求 `/research/实际id`，可观察 running、20/40/60/80 和 completed/100。topic 为 5～200 字符；非法模型或多余字段返回 400。
 
-The free plan needs no payment details and covers 300,000 events a month. You can also browse the [live demo](https://www.observe-demo.nestjs.com/dashboard) first - the whole dashboard over a busy service's data, with nothing to install.
+```bash
+pnpm exec tsc --noEmit --incremental false
+pnpm lint
+pnpm test
+pnpm test:e2e
+```
 
-## Resources
+业务 E2E 验证真实健康接口、DTO 拒绝、任务完成与 404；Service 测试验证关闭钩子等待任务。没有把成功构建等同于容器或远端部署成功。
 
-Check out a few resources that may come in handy when working with NestJS:
+## 限制与总结
 
-- Visit the [NestJS Documentation](https://docs.nestjs.com) to learn more about the framework.
-- For questions and support, please visit our [Discord channel](https://discord.gg/G7Qnnhy).
-- To dive deeper and get more hands-on experience, check out our official video [courses](https://courses.nestjs.com/).
-- Deploy your application to AWS with the help of [NestJS Mau](https://mau.nestjs.com) in just a few clicks.
-- Auto-instrument your application with [NestJS Observe](https://observe.nestjs.com). Distributed tracing, metrics, and logging made easy. Error tracking and performance monitoring for your NestJS applications.
-- Visualize your application graph and interact with the NestJS application in real-time using [NestJS Devtools](https://devtools.nestjs.com).
-- Need help with your project (part-time to full-time)? Check out our official [enterprise support](https://enterprise.nestjs.com).
-- To stay in the loop and get updates, follow us on [X](https://x.com/nestframework) and [LinkedIn](https://linkedin.com/company/nestjs).
-- Looking for a job, or have a job to offer? Check out our official [Jobs board](https://jobs.nestjs.com).
+任务保存在内存中，容器重启会丢失；服务没有用户认证、持久队列和恢复机制。优雅退出只等待当前进程的模拟任务，不等于可靠作业系统。容器停止超时仍可能强制结束进程，真实耗时任务需要另外规划超时与恢复策略。
 
-## Support
+练习：比较本机与容器的 `/health`；修改内存阈值观察不健康响应；创建任务后停止应用，观察结束日志；解释 Nginx 存活和 API 健康的区别。
 
-Nest is an MIT-licensed open source project. It can grow thanks to the sponsors and support by the amazing backers. If you'd like to join them, please [read more here](https://docs.nestjs.com/support).
+本章重点是把已有服务正确启动、检查和结束。最后一章将保留 Nest 的依赖注入能力，同时去掉 HTTP 服务，运行一次性 CLI 工作。
 
-## Stay in touch
-
-- Author - [Kamil Myśliwiec](https://twitter.com/kammysliwiec)
-- Website - [https://nestjs.com](https://nestjs.com/)
-- Twitter - [@nestframework](https://twitter.com/nestframework)
-
-## License
-
-Nest is [MIT licensed](https://github.com/nestjs/nest/blob/master/LICENSE).
+参考：[NestJS Deployment](https://docs.nestjs.com/deployment)。
