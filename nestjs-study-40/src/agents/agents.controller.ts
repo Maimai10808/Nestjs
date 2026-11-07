@@ -12,6 +12,7 @@ import {
 } from '@nestjs/common';
 
 import type { Request } from 'express';
+import { MockAuthGuard } from '../authorization/mock-auth.guard.js';
 
 import {
   AgentsService,
@@ -63,6 +64,7 @@ type AuthenticatedRequest = Request & {
 
 @Controller('agents')
 @UseGuards(
+  MockAuthGuard,
   PermissionsGuard,
   PoliciesGuard,
 )

@@ -1,16 +1,19 @@
 import {
-  IsOptional,
+  IsNotEmpty,
+  ValidateIf,
   IsString,
   MaxLength,
 } from 'class-validator';
 
 export class UpdateAgentDto {
-  @IsOptional()
+  @ValidateIf((_object: object, value: unknown) => value !== undefined)
+  @IsNotEmpty()
   @IsString()
   @MaxLength(100)
   name?: string;
 
-  @IsOptional()
+  @ValidateIf((_object: object, value: unknown) => value !== undefined)
+  @IsNotEmpty()
   @IsString()
   model?: string;
 }

@@ -1,4 +1,6 @@
 import { Module } from '@nestjs/common';
+import { UsersModule } from '../users/users.module.js';
+import { MockAuthGuard } from './mock-auth.guard.js';
 
 import {
   CaslAbilityFactory,
@@ -17,7 +19,9 @@ import {
 } from './policies.guard.js';
 
 @Module({
+  imports: [UsersModule],
   providers: [
+    MockAuthGuard,
     CaslAbilityFactory,
     RolesGuard,
     PermissionsGuard,
@@ -25,6 +29,8 @@ import {
   ],
 
   exports: [
+    UsersModule,
+    MockAuthGuard,
     CaslAbilityFactory,
     RolesGuard,
     PermissionsGuard,

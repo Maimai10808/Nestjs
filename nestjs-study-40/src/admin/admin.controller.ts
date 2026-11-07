@@ -4,6 +4,8 @@ import {
   UseGuards,
 } from '@nestjs/common';
 
+import { MockAuthGuard } from '../authorization/mock-auth.guard.js';
+
 import {
   RolesGuard,
 } from '../authorization/roles.guard.js';
@@ -25,7 +27,7 @@ import {
 } from '../agents/agents.service.js';
 
 @Controller('admin')
-@UseGuards(RolesGuard)
+@UseGuards(MockAuthGuard, RolesGuard)
 @Roles(Role.ADMIN)
 export class AdminController {
   constructor(
