@@ -9,11 +9,11 @@ import { HealthModule } from './health/health.module.js';
 import { HomeController } from './home.controller.js';
 
 @Module({
+  controllers: [HomeController],
   imports: [
     ReportsModule,
     SecurityModule,
     HealthModule,
-    HomeController,
   ],
 })
 export class AppModule {}

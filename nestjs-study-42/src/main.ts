@@ -58,12 +58,12 @@ async function bootstrap() {
 
   // 2. 配置静态资源
   app.useStaticAssets(
-    join(process.cwd(), 'public'),
+    join(import.meta.dirname, 'public'),
   );
 
   // 3. 配置模板目录
   app.setBaseViewsDir(
-    join(process.cwd(), 'views'),
+    join(import.meta.dirname, 'views'),
   );
 
   // 4. 配置 Handlebars
