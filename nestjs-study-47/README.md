@@ -1,132 +1,114 @@
-<p align="center">
-  <a href="http://nestjs.com/" target="blank"><img src="https://nestjs.com/img/logo-small.svg" width="120" alt="Nest Logo" /></a>
-</p>
+# NestJS Study 47：自定义 WebSocket Adapter 与 Redis 广播
 
-[circleci-image]: https://img.shields.io/circleci/build/github/nestjs/nest/master?token=abc123def456
-[circleci-url]: https://circleci.com/gh/nestjs/nest
+当两个 NestJS 实例分别接收客户端连接时，仅使用进程内 Room 无法把实例 A 的任务进度推送给实例 B 的订阅者。本章通过 Socket.IO Redis Adapter 解决这个消息分发问题，业务仍是模拟 Deep Research。
 
-  <p align="center">A progressive <a href="http://nodejs.org" target="_blank">Node.js</a> framework for building efficient and scalable server-side applications.</p>
-    <p align="center">
-<a href="https://www.npmjs.com/~nestjscore" target="_blank"><img src="https://img.shields.io/npm/v/@nestjs/core.svg" alt="NPM Version" /></a>
-<a href="https://www.npmjs.com/~nestjscore" target="_blank"><img src="https://img.shields.io/npm/l/@nestjs/core.svg" alt="Package License" /></a>
-<a href="https://www.npmjs.com/~nestjscore" target="_blank"><img src="https://img.shields.io/npm/dm/@nestjs/common.svg" alt="NPM Downloads" /></a>
-<a href="https://circleci.com/gh/nestjs/nest" target="_blank"><img src="https://img.shields.io/circleci/build/github/nestjs/nest/master" alt="CircleCI" /></a>
-<a href="https://discord.gg/G7Qnnhy" target="_blank"><img src="https://img.shields.io/badge/discord-online-brightgreen.svg" alt="Discord"/></a>
-<a href="https://opencollective.com/nest#backer" target="_blank"><img src="https://opencollective.com/nest/backers/badge.svg" alt="Backers on Open Collective" /></a>
-<a href="https://opencollective.com/nest#sponsor" target="_blank"><img src="https://opencollective.com/nest/sponsors/badge.svg" alt="Sponsors on Open Collective" /></a>
-  <a href="https://paypal.me/kamilmysliwiec" target="_blank"><img src="https://img.shields.io/badge/Donate-PayPal-ff3f59.svg" alt="Donate us"/></a>
-    <a href="https://opencollective.com/nest#sponsor"  target="_blank"><img src="https://img.shields.io/badge/Support%20us-Open%20Collective-41B883.svg" alt="Support us"></a>
-  <a href="https://twitter.com/nestframework" target="_blank"><img src="https://img.shields.io/twitter/follow/nestframework.svg?style=social&label=Follow" alt="Follow us on Twitter"></a>
-</p>
-  <!--[![Backers on Open Collective](https://opencollective.com/nest/backers/badge.svg)](https://opencollective.com/nest#backer)
-  [![Sponsors on Open Collective](https://opencollective.com/nest/sponsors/badge.svg)](https://opencollective.com/nest#sponsor)-->
+## 核心知识
 
-## Description
+- `app.useWebSocketAdapter()` 决定 Gateway 使用哪种底层连接方式。
+- 自定义 [RedisIoAdapter](./src/adapters/redis-io.adapter.ts) 继承 IoAdapter，在创建 Socket.IO Server 后安装 Redis Adapter。
+- Redis 的 pub/sub 两条连接负责跨实例分发广播，不负责保存业务任务。
+- Service 的 `onModuleDestroy()` 取消本实例的模拟延时，防止 Adapter 关闭后继续发布。
+- Adapter 的 `dispose()` 销毁两条 pub/sub 连接，不等待失联 Redis 对 `QUIT` 的回复；这些连接没有需要持久化的业务写入。
+- 已安装的 Redis Adapter 8.3 不等待订阅命令的 Promise；本章为这些命令补充拒绝观察，正常运行时记录错误，关闭时消化主动销毁产生的拒绝，仍将原 Promise 返回给调用方。
 
-[Nest](https://github.com/nestjs/nest) framework TypeScript starter repository.
+## 结构与阅读顺序
 
-## Project setup
-
-```bash
-$ pnpm install
+```text
+src/
+├── main.ts
+├── app.module.ts
+├── adapters/redis-io.adapter.ts
+├── agents/
+│   ├── agents.gateway.ts
+│   ├── agents.service.ts
+│   ├── agents.module.ts
+│   ├── agent.interface.ts
+│   └── native-agents.gateway.ts
+└── health/
+    ├── health.module.ts
+    └── health.controller.ts
+client/socket-client.ts
+docker-compose.yml
 ```
 
-## Compile and run the project
+先读 [main.ts](./src/main.ts) 的连接、安装 Adapter、监听顺序；再读自定义 Adapter 和 [Gateway](./src/agents/agents.gateway.ts) 的 Room；最后读 [Service](./src/agents/agents.service.ts) 和客户端。
 
-```bash
-# development
-$ pnpm run start
+`native-agents.gateway.ts` 保留了原生 ws 的消息响应对照代码，但**当前 AgentsModule 没有注册它，main.ts 也没有安装 WsAdapter**。因此本章实际运行入口为 Socket.IO，`/agents-ws` 不是已开放的接口。
 
-# watch mode
-$ pnpm run start:dev
+## 运行流程
 
-# production mode
-$ pnpm run start:prod
+```mermaid
+flowchart LR
+    A[实例 A 的订阅客户端] --> B[agent.subscribe 加入 Room]
+    C[实例 B 的启动客户端] --> D[agent.start]
+    D --> E[模拟研究五阶段]
+    E --> F[实例 B Socket.IO 广播]
+    F --> G[Redis pub/sub]
+    G --> H[实例 A Socket.IO]
+    H --> A
 ```
 
-## Run tests
+`agent.subscribe` 和 `agent.start` 接受 `{"taskId":"research-1001"}`，都加入 `task:research-1001`。执行实例每秒推送一次 `agent.progress`，依次为 planning、searching、analyzing、generating、completed，进度到 100。
+
+同名 Room 是公开演示频道；taskId 由客户端选择，没有登录、资源权限和分布式任务去重。Redis Adapter 只传播消息，不会让多个 Nest 实例共享 Service 的 JavaScript 对象，也不提供任务持久化、补发和 Worker 调度。
+
+## 启动两个实例
+
+要求 Node.js 24、pnpm 12、Redis。依赖锁定的 NestJS 为 12.3.3。可以使用本章提供的 Redis 容器：
 
 ```bash
-# unit tests
-$ pnpm run test
-
-# e2e tests
-$ pnpm run test:e2e
-
-# test coverage
-$ pnpm run test:cov
+pnpm install --frozen-lockfile
+docker compose up -d redis
 ```
 
-## Deployment
+该配置只向本机暴露 6379，关闭持久化。已有 Redis 时可以直接指定 `REDIS_URL`，不要覆盖其他项目的数据或进程。
 
-When you're ready to deploy your NestJS application to production, there are some key steps you can take to ensure it runs as efficiently as possible. Check out the [deployment documentation](https://docs.nestjs.com/deployment) for more information.
-
-If you are looking for a cloud-based platform to deploy your NestJS application, check out [Mau](https://mau.nestjs.com), our official platform for deploying NestJS applications on AWS. Mau makes deployment straightforward and fast, requiring just a few simple steps:
+终端 A：
 
 ```bash
-$ pnpm install -g @nestjs/mau
-$ mau deploy
+INSTANCE_ID=A PORT=3000 REDIS_URL=redis://127.0.0.1:6379 pnpm start:dev
 ```
 
-With Mau, you can deploy your application in just a few clicks, allowing you to focus on building features rather than managing infrastructure.
-
-## Observability
-
-In production applications, observability is essential for understanding how your system behaves, detecting issues early, and maintaining reliable performance.
-
-[NestJS Observe](https://observe.nestjs.com) automatically instruments your NestJS application, giving you deep visibility into your system with minimal setup:
-
-- **Distributed tracing:** Follow requests across services and understand how they flow through your system.
-- **Waterfall analysis:** Visualize request execution and identify slow operations, bottlenecks, and unexpected delays.
-- **Performance analysis:** Analyze application performance in real time and quickly pinpoint areas that need optimization.
-- **Metrics:** Track key application and infrastructure metrics to understand system health and performance trends.
-- **Logging:** Centralize and correlate logs with traces and other telemetry to make debugging easier.
-- **Error tracking:** Detect errors quickly and investigate their root causes with the surrounding context.
-- **SLA monitoring:** Track service-level objectives and identify when your application is approaching or exceeding defined thresholds.
-- **Alarms and alerts:** Set up alerts for critical errors, performance degradation, SLA violations, and other anomalies so your team can react quickly.
-
-To add it to this project, run this and approve the code it prints at [observe.nestjs.com/link](https://observe.nestjs.com/link) - signing up for free if you have no account:
+终端 B：
 
 ```bash
-$ npx @nestjs/observe link
+INSTANCE_ID=B PORT=3001 REDIS_URL=redis://127.0.0.1:6379 pnpm start:dev
 ```
 
-It installs `@nestjs/observe`, wires it into `AppModule` and `main.ts`, and writes the app key and secret into `.env`, which every `nest start` script (`start`, `start:dev`, `start:debug`) then loads. In production, set `OBSERVE_APP_KEY` and `OBSERVE_APP_SECRET` in the environment instead.
-
-Or do it by hand:
+终端 C 订阅实例 A，终端 D 从实例 B 启动相同频道：
 
 ```bash
-$ pnpm install @nestjs/observe
+PORT=3000 TASK_ID=research-1001 MODE=subscribe pnpm exec tsx client/socket-client.ts
 ```
 
-Then follow the [setup guide](https://docs.nestjs.com/observability/sdk) - it takes a single import and an app key.
+```bash
+PORT=3001 TASK_ID=research-1001 MODE=start pnpm exec tsx client/socket-client.ts
+```
 
-The free plan needs no payment details and covers 300,000 events a month. You can also browse the [live demo](https://www.observe-demo.nestjs.com/dashboard) first - the whole dashboard over a busy service's data, with nothing to install.
+预期两个客户端都收到五次进度，100 时断开。若 taskId 不同，应互相看不到频道事件。
 
-## Resources
+```bash
+curl http://localhost:3000/health
+curl http://localhost:3001/health
+pnpm build
+pnpm exec tsc --noEmit --incremental false
+pnpm lint
+pnpm test
+REDIS_URL=redis://127.0.0.1:6379 pnpm test:e2e
+```
 
-Check out a few resources that may come in handy when working with NestJS:
+E2E 在随机 HTTP 端口启动两个真实应用，共用指定 Redis，跨实例订阅、广播并关闭；另通过本地 TCP 代理模拟连接仍在但服务不回复的情况，验证应用能完成关闭；还在接受任务后立即关闭应用并等待原五阶段时长，确认没有延迟发布引发的未处理拒绝。单元测试验证应用销毁时停止模拟流程，且不再产生进度回调。它不 Mock Redis。Redis 不可用意味着这条核心验证受阻，不能仅凭类型检查宣称广播通过。
 
-- Visit the [NestJS Documentation](https://docs.nestjs.com) to learn more about the framework.
-- For questions and support, please visit our [Discord channel](https://discord.gg/G7Qnnhy).
-- To dive deeper and get more hands-on experience, check out our official video [courses](https://courses.nestjs.com/).
-- Deploy your application to AWS with the help of [NestJS Mau](https://mau.nestjs.com) in just a few clicks.
-- Auto-instrument your application with [NestJS Observe](https://observe.nestjs.com). Distributed tracing, metrics, and logging made easy. Error tracking and performance monitoring for your NestJS applications.
-- Visualize your application graph and interact with the NestJS application in real-time using [NestJS Devtools](https://devtools.nestjs.com).
-- Need help with your project (part-time to full-time)? Check out our official [enterprise support](https://enterprise.nestjs.com).
-- To stay in the loop and get updates, follow us on [X](https://x.com/nestframework) and [LinkedIn](https://linkedin.com/company/nestjs).
-- Looking for a job, or have a job to offer? Check out our official [Jobs board](https://jobs.nestjs.com).
+## 常见问题与边界
 
-## Support
+- Redis 未启动或 URL 错误时应用无法完成 Adapter 初始化；先确认容器或本地 Redis 可达。
+- 客户端强制 WebSocket transport，因此不会演示多实例 HTTP polling 的粘性会话配置。
+- Gateway 中的开放 CORS 是公开频道演示配置，不是权限控制。生产私有任务应在认证之后验证订阅权限。
+- 模拟流程不随单个订阅者断开取消；本实例应用关闭时会取消本地延时。这不等于持久后台任务或真实模型调用的取消，也没有任务恢复；重复 `agent.start` 会启动多条模拟执行。
+- 所有研究内容由定时器产生，没有收费 API。
 
-Nest is an MIT-licensed open source project. It can grow thanks to the sponsors and support by the amazing backers. If you'd like to join them, please [read more here](https://docs.nestjs.com/support).
+练习：用不同 taskId 对比 Room 隔离；停掉其中一个客户端观察另一个；给广播加 instanceId；阅读未注册的 NativeAgentsGateway，说明切换到原生 ws 还需要修改哪些注册和客户端协议。
 
-## Stay in touch
+本章应掌握的是消息传输与业务任务两个层次的区别。Redis Adapter 的作用是分发 Socket.IO 广播，下一章则使用 TCP Transport 执行服务间请求。
 
-- Author - [Kamil Myśliwiec](https://twitter.com/kammysliwiec)
-- Website - [https://nestjs.com](https://nestjs.com/)
-- Twitter - [@nestframework](https://twitter.com/nestframework)
-
-## License
-
-Nest is [MIT licensed](https://github.com/nestjs/nest/blob/master/LICENSE).
+参考：[NestJS WebSocket Adapter](https://docs.nestjs.com/websockets/adapter)。
