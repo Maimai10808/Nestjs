@@ -1,132 +1,127 @@
-<p align="center">
-  <a href="http://nestjs.com/" target="blank"><img src="https://nestjs.com/img/logo-small.svg" width="120" alt="Nest Logo" /></a>
-</p>
+# NestJS Study 43：CORS、Session 与 CSRF
 
-[circleci-image]: https://img.shields.io/circleci/build/github/nestjs/nest/master?token=abc123def456
-[circleci-url]: https://circleci.com/gh/nestjs/nest
+模拟一个使用 Cookie 登录的 Agent 管理站点。前端与后端跨端口访问时，CORS 决定浏览器能否读取响应，CSRF 则要求修改操作携带与当前 Session 绑定的 Token。两者解决不同问题。
 
-  <p align="center">A progressive <a href="http://nodejs.org" target="_blank">Node.js</a> framework for building efficient and scalable server-side applications.</p>
-    <p align="center">
-<a href="https://www.npmjs.com/~nestjscore" target="_blank"><img src="https://img.shields.io/npm/v/@nestjs/core.svg" alt="NPM Version" /></a>
-<a href="https://www.npmjs.com/~nestjscore" target="_blank"><img src="https://img.shields.io/npm/l/@nestjs/core.svg" alt="Package License" /></a>
-<a href="https://www.npmjs.com/~nestjscore" target="_blank"><img src="https://img.shields.io/npm/dm/@nestjs/common.svg" alt="NPM Downloads" /></a>
-<a href="https://circleci.com/gh/nestjs/nest" target="_blank"><img src="https://img.shields.io/circleci/build/github/nestjs/nest/master" alt="CircleCI" /></a>
-<a href="https://discord.gg/G7Qnnhy" target="_blank"><img src="https://img.shields.io/badge/discord-online-brightgreen.svg" alt="Discord"/></a>
-<a href="https://opencollective.com/nest#backer" target="_blank"><img src="https://opencollective.com/nest/backers/badge.svg" alt="Backers on Open Collective" /></a>
-<a href="https://opencollective.com/nest#sponsor" target="_blank"><img src="https://opencollective.com/nest/sponsors/badge.svg" alt="Sponsors on Open Collective" /></a>
-  <a href="https://paypal.me/kamilmysliwiec" target="_blank"><img src="https://img.shields.io/badge/Donate-PayPal-ff3f59.svg" alt="Donate us"/></a>
-    <a href="https://opencollective.com/nest#sponsor"  target="_blank"><img src="https://img.shields.io/badge/Support%20us-Open%20Collective-41B883.svg" alt="Support us"></a>
-  <a href="https://twitter.com/nestframework" target="_blank"><img src="https://img.shields.io/twitter/follow/nestframework.svg?style=social&label=Follow" alt="Follow us on Twitter"></a>
-</p>
-  <!--[![Backers on Open Collective](https://opencollective.com/nest/backers/badge.svg)](https://opencollective.com/nest#backer)
-  [![Sponsors on Open Collective](https://opencollective.com/nest/sponsors/badge.svg)](https://opencollective.com/nest#sponsor)-->
+## 核心知识
 
-## Description
+- `express-session`：浏览器只保存不透明 Session ID，用户 ID 在服务端内存会话中。
+- `cookie-parser → session → CSRF middleware`：中间件顺序保证 CSRF 验证能读取 Cookie 与会话标识。
+- `csrf-csrf` 4.x 的 `generateCsrfToken()`：生成基于会话标识和服务端密钥的双重提交 Token。旧示例中的 `generateToken()` 不适用于此版本。
+- CSRF Cookie 为 HttpOnly；前端通过 JSON 响应取得 Token，再写入 `X-CSRF-Token`，不需要读取 HttpOnly Cookie。
+- 登录后 `session.regenerate()` 改变 Session ID，因此必须重新获取 CSRF Token。
+- `SessionGuard` 检查登录；`AgentsService.findOwned()` 检查资源属于当前用户。CSRF 本身不授予访问权。
 
-[Nest](https://github.com/nestjs/nest) framework TypeScript starter repository.
+## 结构与推荐阅读顺序
 
-## Project setup
-
-```bash
-$ pnpm install
+```text
+src/
+├── app.module.ts                     # ConfigModule 与业务模块
+├── main.ts                           # CORS、Cookie、Session、CSRF、DTO
+├── security/
+│   ├── csrf.config.ts                # 会话绑定与 Cookie 配置
+│   └── security.controller.ts        # 获取 Token、查看 CORS 说明
+├── auth/
+│   ├── auth.controller.ts            # regenerate、save、destroy
+│   ├── auth.service.ts               # 固定教学账号
+│   └── session.guard.ts
+├── agents/
+│   ├── agents.controller.ts
+│   ├── agents.service.ts             # 写操作校验所有权
+│   └── dto/update-agent.dto.ts        # PATCH name 也必须校验
+└── types/session.d.ts                # 扩展 SessionData
 ```
 
-## Compile and run the project
+推荐 `main.ts → security/csrf.config.ts → security/security.controller.ts → auth/auth.controller.ts → auth/session.guard.ts → agents/agents.controller.ts → agents/agents.service.ts`。
 
-```bash
-# development
-$ pnpm run start
+## 执行流程
 
-# watch mode
-$ pnpm run start:dev
+匿名请求 `/security/csrf-token` 时写入 `csrfInitialized`，确保 `saveUninitialized: false` 下仍会保存匿名会话。登录的 POST 本身也受 CSRF 防护，不能跳过第一步。
 
-# production mode
-$ pnpm run start:prod
+```mermaid
+sequenceDiagram
+  participant C as 客户端 Cookie Jar
+  participant S as NestJS
+  C->>S: GET /security/csrf-token
+  S-->>C: Session Cookie + CSRF Cookie + JSON Token
+  C->>S: POST /auth/login + Cookie + X-CSRF-Token
+  S-->>C: regenerate 后的新 Session Cookie
+  C->>S: GET /security/csrf-token
+  S-->>C: 与新 Session 绑定的 Token
+  C->>S: POST/PATCH/DELETE + 新 Token + Cookie
+  S-->>C: 校验 CSRF、登录、DTO、所有权后响应
 ```
 
-## Run tests
+旧 Token 在登录后失效是预期行为。获取新 Token 时会验证旧 Cookie 是否适用于当前会话，不匹配时重新生成。另一个会话的 Token 不能移植使用。
+
+## 启动
+
+需要 Node.js 24、pnpm，NestJS 12 / TypeScript 6。不需要 Redis、数据库或模型 API。
 
 ```bash
-# unit tests
-$ pnpm run test
-
-# e2e tests
-$ pnpm run test:e2e
-
-# test coverage
-$ pnpm run test:cov
+pnpm install --frozen-lockfile
+cp .env.example .env
+export SESSION_SECRET="$(node -e "process.stdout.write(require('node:crypto').randomBytes(32).toString('hex'))")"
+export CSRF_SECRET="$(node -e "process.stdout.write(require('node:crypto').randomBytes(32).toString('hex'))")"
+pnpm start:dev
 ```
 
-## Deployment
+两项密钥都要求至少 32 字符，分别生成并保存在本地环境。`FRONTEND_ORIGIN` 默认 `http://localhost:8888`，`PORT` 默认 3000。教学 HTTP Cookie 使用 `secure: false`、`sameSite: lax`；HTTPS 部署需要相应调整。
 
-When you're ready to deploy your NestJS application to production, there are some key steps you can take to ensure it runs as efficiently as possible. Check out the [deployment documentation](https://docs.nestjs.com/deployment) for more information.
+## 接口与 curl 验证
 
-If you are looking for a cloud-based platform to deploy your NestJS application, check out [Mau](https://mau.nestjs.com), our official platform for deploying NestJS applications on AWS. Mau makes deployment straightforward and fast, requiring just a few simple steps:
+| Method | 路由 | 说明 |
+|---|---|---|
+| GET | `/security/csrf-token` | 初始化会话并取得 Token |
+| GET | `/security/cors-info` | 查看允许的来源与 Header 名 |
+| POST | `/auth/login` | Cookie 登录，201，必须有 CSRF Token |
+| GET | `/auth/me` | 当前会话用户 |
+| POST | `/auth/logout` | 销毁会话，清除 Session Cookie |
+| GET | `/agents` | 公开教学目录 |
+| GET | `/agents/my` | 当前用户的 Agent |
+| POST | `/agents` | 创建自己的 Agent |
+| PATCH | `/agents/:id` | 校验 `name` 后更新自己的 Agent |
+| DELETE | `/agents/:id` | 删除自己的 Agent |
+
+以下命令用 Node.js 提取 JSON，不要求额外安装 jq。在同一终端执行；Cookie 文件放到临时目录。
 
 ```bash
-$ pnpm install -g @nestjs/mau
-$ mau deploy
+JAR="$(mktemp)"
+CSRF="$(curl -s -c "$JAR" -b "$JAR" http://localhost:3000/security/csrf-token | node -pe 'JSON.parse(require("fs").readFileSync(0,"utf8")).csrfToken')"
+curl -i -c "$JAR" -b "$JAR" -X POST http://localhost:3000/auth/login \
+  -H "X-CSRF-Token: $CSRF" -H 'Content-Type: application/json' \
+  -d '{"username":"robin","password":"Robin123456!"}'
+CSRF="$(curl -s -c "$JAR" -b "$JAR" http://localhost:3000/security/csrf-token | node -pe 'JSON.parse(require("fs").readFileSync(0,"utf8")).csrfToken')"
+curl -i -b "$JAR" -X POST http://localhost:3000/agents \
+  -H "X-CSRF-Token: $CSRF" -H 'Content-Type: application/json' \
+  -d '{"name":"Research","model":"mock"}'
+curl -i -b "$JAR" -X POST http://localhost:3000/agents \
+  -H 'Content-Type: application/json' -d '{"name":"No token","model":"mock"}'
+curl -i -b "$JAR" -X PATCH http://localhost:3000/agents/3 \
+  -H "X-CSRF-Token: $CSRF" -H 'Content-Type: application/json' -d '{"name":"Denied"}'
+curl -i -c "$JAR" -b "$JAR" -X POST http://localhost:3000/auth/logout -H "X-CSRF-Token: $CSRF"
+rm "$JAR"
 ```
 
-With Mau, you can deploy your application in just a few clicks, allowing you to focus on building features rather than managing infrastructure.
-
-## Observability
-
-In production applications, observability is essential for understanding how your system behaves, detecting issues early, and maintaining reliable performance.
-
-[NestJS Observe](https://observe.nestjs.com) automatically instruments your NestJS application, giving you deep visibility into your system with minimal setup:
-
-- **Distributed tracing:** Follow requests across services and understand how they flow through your system.
-- **Waterfall analysis:** Visualize request execution and identify slow operations, bottlenecks, and unexpected delays.
-- **Performance analysis:** Analyze application performance in real time and quickly pinpoint areas that need optimization.
-- **Metrics:** Track key application and infrastructure metrics to understand system health and performance trends.
-- **Logging:** Centralize and correlate logs with traces and other telemetry to make debugging easier.
-- **Error tracking:** Detect errors quickly and investigate their root causes with the surrounding context.
-- **SLA monitoring:** Track service-level objectives and identify when your application is approaching or exceeding defined thresholds.
-- **Alarms and alerts:** Set up alerts for critical errors, performance degradation, SLA violations, and other anomalies so your team can react quickly.
-
-To add it to this project, run this and approve the code it prints at [observe.nestjs.com/link](https://observe.nestjs.com/link) - signing up for free if you have no account:
+合法创建 201；缺少 Token 403；修改另一个用户资源 403。账号 `robin / Robin123456!`、`alan / Alan123456!` 均为固定假账号。
 
 ```bash
-$ npx @nestjs/observe link
+pnpm exec tsc --noEmit --incremental false
+pnpm lint
+pnpm test
+pnpm test:e2e
+pnpm build
+pnpm start:prod
 ```
 
-It installs `@nestjs/observe`, wires it into `AppModule` and `main.ts`, and writes the app key and secret into `.env`, which every `nest start` script (`start`, `start:dev`, `start:debug`) then loads. In production, set `OBSERVE_APP_KEY` and `OBSERVE_APP_SECRET` in the environment instead.
+E2E 启动真实 HTTP 应用，验证匿名 Token、登录后轮换、旧 Token 拒绝、跨会话 Token 拒绝、CORS、DTO、所有权与退出。
 
-Or do it by hand:
+## 常见问题与边界
 
-```bash
-$ pnpm install @nestjs/observe
-```
+- 登录立即返回 403：检查是否先获取 Token，是否同时保存 Cookie 并发送 Header。
+- 登录后写操作 403：Session 已轮换，请重新获取 Token。
+- curl 可以读取“不允许的来源”：CORS 是浏览器读取限制，不是网络级访问防火墙；curl 不执行浏览器的 CORS 策略。
+- 内存 Session Store 重启丢失，也不能跨进程共享。教学密码是明文固定值；真实认证应使用密码哈希。本章没有前端项目，不把跨站 HTTPS Cookie 配置误写成已经验证。
 
-Then follow the [setup guide](https://docs.nestjs.com/observability/sdk) - it takes a single import and an app key.
+练习：在另一个 Cookie Jar 中重放 Token；修改允许的 Origin 观察浏览器结果；给 PATCH 添加字段并保持 DTO 白名单。重点掌握 Cookie 身份、CSRF、CORS 和资源授权各自的边界。
 
-The free plan needs no payment details and covers 300,000 events a month. You can also browse the [live demo](https://www.observe-demo.nestjs.com/dashboard) first - the whole dashboard over a busy service's data, with nothing to install.
-
-## Resources
-
-Check out a few resources that may come in handy when working with NestJS:
-
-- Visit the [NestJS Documentation](https://docs.nestjs.com) to learn more about the framework.
-- For questions and support, please visit our [Discord channel](https://discord.gg/G7Qnnhy).
-- To dive deeper and get more hands-on experience, check out our official video [courses](https://courses.nestjs.com/).
-- Deploy your application to AWS with the help of [NestJS Mau](https://mau.nestjs.com) in just a few clicks.
-- Auto-instrument your application with [NestJS Observe](https://observe.nestjs.com). Distributed tracing, metrics, and logging made easy. Error tracking and performance monitoring for your NestJS applications.
-- Visualize your application graph and interact with the NestJS application in real-time using [NestJS Devtools](https://devtools.nestjs.com).
-- Need help with your project (part-time to full-time)? Check out our official [enterprise support](https://enterprise.nestjs.com).
-- To stay in the loop and get updates, follow us on [X](https://x.com/nestframework) and [LinkedIn](https://linkedin.com/company/nestjs).
-- Looking for a job, or have a job to offer? Check out our official [Jobs board](https://jobs.nestjs.com).
-
-## Support
-
-Nest is an MIT-licensed open source project. It can grow thanks to the sponsors and support by the amazing backers. If you'd like to join them, please [read more here](https://docs.nestjs.com/support).
-
-## Stay in touch
-
-- Author - [Kamil Myśliwiec](https://twitter.com/kammysliwiec)
-- Website - [https://nestjs.com](https://nestjs.com/)
-- Twitter - [@nestframework](https://twitter.com/nestframework)
-
-## License
-
-Nest is [MIT licensed](https://github.com/nestjs/nest/blob/master/LICENSE).
+参考：[中文 CSRF 文档](https://docs.nestjs.cn/security/csrf/)、[官方 CSRF 文档](https://docs.nestjs.com/security/csrf)、[官方 CORS 文档](https://docs.nestjs.com/security/cors)。
