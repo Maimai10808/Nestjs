@@ -19,10 +19,10 @@
     "test:watch": "vitest",
     "test:cov": "vitest run --coverage",
     "test:debug": "vitest --inspect-brk --no-file-parallelism",
-    "test:e2e": "vitest run --config ./vitest.config.e2e.ts",
-    "cli": "tsx src/cli/main.ts",
-    "research": "tsx src/cli/main.ts research",
-    "knowledge:build": "tsx src/cli/main.ts knowledge:build"
+    "test:e2e": "pnpm build && vitest run --config ./vitest.config.e2e.ts",
+    "cli": "pnpm build && node dist/cli/main.js",
+    "research": "pnpm cli research",
+    "knowledge:build": "pnpm cli knowledge:build"
   },
   "dependencies": {
     "@nestjs/common": "^12.0.1",
