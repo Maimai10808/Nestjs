@@ -12,8 +12,6 @@ import {
   WebSocketGateway,
 } from '@nestjs/websockets';
 
-import type { Socket } from 'socket.io';
-
 import { AgentsService } from './agents.service.js';
 
 import {

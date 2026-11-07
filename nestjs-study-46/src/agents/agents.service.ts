@@ -4,7 +4,7 @@ import {
 
 import { randomUUID } from 'node:crypto';
 
-interface AgentTask {
+export interface AgentTask {
   id: string;
   userId: number;
   prompt: string;
