@@ -1,6 +1,6 @@
-# NestJS 中文实战学习仓库
+# NestJS Study 1～50：TypeScript 后端学习仓库
 
-基于 NestJS 官方文档、围绕真实业务场景组织的 TypeScript 后端学习项目。仓库目前包含 38 个独立目录：Study 1–16 为概述与 Fundamentals，Study 17–19、21–38 为已实现的 Techniques 示例，Study 20 仍是脚手架，适合能阅读 JavaScript、TypeScript、React、了解基本 HTTP，但尚未系统学习后端架构的开发者。
+基于 NestJS 官方文档、围绕真实业务场景组织的 TypeScript 后端学习项目。仓库目前包含 **50 个独立 Study 目录**：涵盖基础、依赖注入、数据与 HTTP 技术、安全、实时通信、TCP 微服务、本地部署和独立应用。**Study 20 仍是保留的 Hello World 脚手架，没有实现 MongoDB 专题**；其他章节的业务与验证范围见下表和各章 README。适合能阅读 JavaScript、TypeScript、React、了解基本 HTTP，但尚未系统学习后端架构的开发者。
 
 你将从用户接口、商品下单走到 Agent 管理、模型 Provider、请求作用域、懒加载和工具发现。业务代码尽量小，让每一个框架机制都能通过阅读、运行和修改得到验证。
 
@@ -54,7 +54,7 @@
 | 21 | Validation | Agent CRUD、分页、批量与嵌套执行选项；DTO、转换、PartialType | [README](./nestjs-study-21/README.md) |
 | 22 | Caching：基础 | 公开 Agent 与模型目录；GET 拦截器缓存、手动缓存、毫秒 TTL | [README](./nestjs-study-22/README.md) |
 | 23 | Caching：失效与分组 | Agent 写入后清理缓存、公开用户分组；自定义 Key、主动失效 | [README](./nestjs-study-23/README.md) |
-| 24 | Serialization | Agent / 用户公开视图；ClassSerializerInterceptor、Expose、Exclude、groups | [README](./nestjs-study-24/README.md) |
+| 24 | Serialization | Agent / 用户公开视图；ClassSerializerInterceptor、Expose、Exclude、Transform | [README](./nestjs-study-24/README.md) |
 | 25 | Versioning | V1/V2 论文任务接口；URI 版本、公共路由与 Mock 异步完成 | [README](./nestjs-study-25/README.md) |
 | 26 | Task Scheduling | Agent 静态 Cron/Interval/Timeout、动态 Cron 与延迟任务管理 | [README](./nestjs-study-26/README.md) |
 | 27 | Queues / BullMQ | Redis 队列中的 Agent 执行；WorkerHost、进度、重试、暂停与结果 | [README](./nestjs-study-27/README.md) |
@@ -70,16 +70,40 @@
 | 37 | Performance / Fastify | Agent 与研究接口；FastifyAdapter、原生 hook、适配器差异 | [README](./nestjs-study-37/README.md) |
 | 38 | SSE | 模拟 Deep Research 阶段和 Token 流；Observable、MessageEvent、断连与异步初始化清理 | [README](./nestjs-study-38/README.md) |
 
-### 学习状态与后续模块
+### Security（Study 39–44）
 
-| 官方模块 | 当前仓库状态 |
+| Study | 学习主题 | 实际业务与核心知识 | 项目状态 | 文档 |
+| --- | --- | --- | --- | --- |
+| 39 | Authentication | 个人 Agent；scrypt 密码校验、JWT、全局 Guard、Public、所有权 | 已实现 | [README](./nestjs-study-39/README.md) |
+| 40 | Authorization | Agent 管理；服务器映射身份、Roles、Permissions、CASL 资源策略 | 已实现，公开 Mock Token | [README](./nestjs-study-40/README.md) |
+| 41 | Encryption and Hashing | 模型凭证管理；bcrypt、AES-256-GCM、密钥校验、用户隔离 | 已实现 | [README](./nestjs-study-41/README.md) |
+| 42 | Helmet | 研究报告页面；CSP、安全响应头、模板与静态资源 | 已实现 | [README](./nestjs-study-42/README.md) |
+| 43 | CSRF | 会话中的 Agent CRUD；双提交 Cookie、Session 绑定、登录后更新 Token | 已实现 | [README](./nestjs-study-43/README.md) |
+| 44 | Rate Limiting | 模型和研究请求；命名时间窗、路由覆盖、跳过限流 | 已实现 | [README](./nestjs-study-44/README.md) |
+
+### 实时通信、微服务与应用收尾（Study 45–50）
+
+| Study | 学习主题 | 实际业务与核心知识 | 项目状态 | 文档 |
+| --- | --- | --- | --- | --- |
+| 45 | WebSocket Gateway | Coding Agent 进度、任务房间、人工审批、取消与断连 | 已实现，模拟执行 | [README](./nestjs-study-45/README.md) |
+| 46 | WebSocket 请求管线 | Agent 消息；认证/管理 Guard、验证 Pipe、Filter、Interceptor | 已实现，公开 Mock Token | [README](./nestjs-study-46/README.md) |
+| 47 | WebSocket Adapter | Redis Socket.IO 跨实例广播与连接关闭；原生 ws 仅保留对照源码 | 已实现，需要 Redis | [README](./nestjs-study-47/README.md) |
+| 48 | TCP Microservices | HTTP API 调用 Agent Worker；消息模式、共享类型、超时与事件 | 已实现，同章两个独立进程 | [README](./nestjs-study-48/README.md) |
+| 49 | Deployment | 研究任务 API；健康检查、优雅关闭、Docker 与 Nginx 反向代理 | 本地部署示例 | [README](./nestjs-study-49/README.md) |
+| 50 | Standalone Applications | CLI 研究报告和知识库构建；ApplicationContext、显式关闭 | 已实现，模拟模型 | [README](./nestjs-study-50/README.md) |
+
+Study 1–19、21–50 是已有业务示例；Study 20 的脚手架状态单独列出。表中的“已实现”表示本章教学机制有真实源码，不表示经过生产安全认证或覆盖了官方全部子章节。逐章检查状态以 [最终审查报告](./docs/NESTJS-STUDY-FINAL-REVIEW.md) 为准。
+
+| 知识体系 | 当前范围 |
 | --- | --- |
-| Overview / Fundamentals | Study 1–16 已有源码和教学文档，按各章实际主题覆盖，不代表官方每个子章节一一完成 |
-| Techniques | 21 个实质 Study，覆盖中文目录中除 MongoDB 外的 19 个技术主题；Study 20 为保留脚手架 |
-| Security | 已有 Guard、Cookie、Session 中的局部示例，尚无独立完整安全专题课程 |
+| NestJS 基础、模块与 DI | Study 1–16 |
+| 配置、持久化、验证与 HTTP | Study 17–25、28–29、31–37；MongoDB 未实现 |
+| 异步执行与事件 | Study 26–27、30；SSE 见 38 |
+| 身份、权限与安全 | Study 39–44，结合 5、7、14、29、35 回顾 |
+| 实时通信 | Study 38 的 SSE、45–47 的 WebSocket |
+| 微服务 | Study 48 的 TCP；不等同于实现 RabbitMQ、Kafka 等全部传输 |
+| 部署与无 HTTP 应用 | Study 49、50 |
 | GraphQL | 尚无已实现的独立 Study |
-| WebSockets | 尚无已实现的独立 Study，SSE 不等于 WebSocket |
-| Microservices | 尚无已实现的独立 Study，使用 Redis 队列不等于完成微服务课程 |
 
 英文官方文档当前会将部分 Techniques 内容归入 Application、Data、HTTP 等栏目；本仓库保留中文 Techniques 学习路线，并按实际安装版本核对 API。MongoDB 不存在完整实现，不能把脚手架的构建通过当作章节完成。
 
@@ -90,7 +114,8 @@ Nestjs/
 ├── README.md
 ├── docs/
 │   ├── AUDIT.md                 # Study 1–16 的历史审查记录
-│   └── TECHNIQUES_AUDIT.md      # Study 17–38 的清单、修复与验证边界
+│   ├── TECHNIQUES_AUDIT.md      # Study 17–38 的历史清单与验证边界
+│   └── NESTJS-STUDY-FINAL-REVIEW.md  # 本轮 1～50 最终审查与测试结果
 ├── scripts/
 │   └── verify-studies.mjs
 ├── nestjs-study-1/
@@ -130,24 +155,36 @@ Nestjs/
 ├── nestjs-study-35/
 ├── nestjs-study-36/
 ├── nestjs-study-37/
-└── nestjs-study-38/
+├── nestjs-study-38/
+├── nestjs-study-39/
+├── nestjs-study-40/
+├── nestjs-study-41/
+├── nestjs-study-42/
+├── nestjs-study-43/
+├── nestjs-study-44/
+├── nestjs-study-45/
+├── nestjs-study-46/
+├── nestjs-study-47/
+├── nestjs-study-48/
+├── nestjs-study-49/
+└── nestjs-study-50/
 ```
 
-每个 Study 自带 `package.json`、`pnpm-lock.yaml`、TypeScript/Nest/Vitest 配置、`src/main.ts` 和测试，独立安装、构建和启动。根目录没有把它们合并成应用或 pnpm workspace。各章业务数据也不互通。
+每个 Study 自带 `package.json`、`pnpm-lock.yaml`、TypeScript/Nest/Vitest 配置和测试，独立安装、构建和启动。Study 48 使用同章的 `apps/api`、`apps/agent-worker` 和 `libs/contracts`，有两个启动入口；Study 50 的学习入口是 `src/cli/main.ts`。根目录没有把它们合并成应用或 pnpm workspace。各章业务数据也不互通。
 
 ## 开发环境与版本
 
-Study 1–38 的共同框架版本与各章专用依赖分别维护。Techniques 审查核对了 17–38 的 `package.json`、锁文件与已安装依赖。当前共同的声明与实际版本如下；新增章节仍应单独核对，不能依赖这张表自动升级。
+Study 1–50 的框架版本与各章专用依赖分别维护。Techniques 审查核对了 17–38 的 `package.json`、锁文件与已安装依赖。当前共同的声明与实际版本如下；新增章节仍应单独核对，不能依赖这张表自动升级。
 
 | 工具 | 当前声明 | 锁文件及安装结果 |
 | --- | --- | --- |
-| Nest common/core/platform-express | `^12.0.1` | 12.3.2 |
+| Nest common/core/platform-express | `^12.0.1` | 1–40 为 12.3.2；41–50 为 12.3.3 |
 | Nest CLI | `^12.0.0` | 12.0.11 |
 | TypeScript | `^6.0.2` | 6.0.3 |
-| Vite | `^8.0.0` | 8.3.5 |
+| Vite | `^8.0.0` | 1–40 为 8.3.5；41–50 为 8.3.6 |
 | Vitest | `^4.1.2` | 4.1.12 |
 
-本机验证使用 **Node.js 24.5.0、pnpm 12.3.4**。建议使用 Node.js 24；当前 Vite 要求 `^20.19.0 || >=22.12.0`，Vitest 要求 `^20 || ^22 || >=24`，不能只看 Nest 的 Node 最低要求。仓库原本没有统一的 engines 或 packageManager 锁定；安装时使用每章锁文件。
+本轮本机验证使用 **Node.js 24.21.0、pnpm 12.3.4**；旧章节记录的 Node 24.5.0 是历史验证环境。建议使用 Node.js 24；当前 Vite 要求 `^20.19.0 || >=22.12.0`，Vitest 要求 `^20 || ^22 || >=24`，不能只看 Nest 的 Node 最低要求。仓库原本没有统一的 engines 或 packageManager 锁定；安装时使用每章锁文件。
 
 各章依赖有区别：1、4、6 安装了 class-validator/class-transformer；9 使用真实 Redis 客户端；19 使用 PostgreSQL/TypeORM；27 使用 BullMQ 6.5.3 和显式安装的 ioredis 驱动；37 使用 Fastify 适配器；8、10、12 以及 Techniques 中的 AI 输出为本地 Mock。1 保留原有 Observe 依赖，但当前应用没有注册遥测模块，也不要求凭证。
 
@@ -190,7 +227,7 @@ pnpm test:e2e
 | 34 | 默认请求本应用的 /external Mock；也可配置 EXTERNAL_API_BASE_URL |
 | 35 | SESSION_SECRET 至少 32 字符；.env.example 仅是公开学习夹具 |
 
-其他 Techniques 示例不要求外部服务；当前所有 AI 输出都是模拟，不需要真实模型 Key。
+其他 Techniques 示例不要求外部服务；当前所有 AI 输出都是模拟，不需要真实模型 Key。Study 39/41 需本地 JWT 与加密配置，43 需 Session/CSRF 配置；使用各章 `.env.example` 学习夹具，真实部署自行生成密钥。Study 47 需要 Redis，48 同时启动 API 与 TCP Worker；49 的容器验证需要 Docker；50 运行 CLI，不需要启动 HTTP。
 
 如果各章依赖都已安装，可以在根目录执行：
 
@@ -213,10 +250,12 @@ RUN_DATABASE_E2E=1 node scripts/verify-studies.mjs 17 18 19 20 21 22 23 24 25 26
 
 这些边界在各章 README 中有对应说明。学习时先验证当前实现，再把数据库、真实认证等作为单独的新主题推进。
 
-## 后续学习计划
+## 学习阶段总结与后续路线
 
-已实现的配置、SQL、缓存、队列、调度、日志、上传与 SSE 可作为继续学习的基础。后续可能增加 MongoDB、持久缓存与队列进阶、完整认证与授权、WebSocket、GraphQL、微服务以及跨任务恢复的 AI Agent 后端架构；这些方向尚未作为新的完整 Study 交付。
+这 50 个目录记录了第一阶段的 NestJS 系统学习成果。本轮集中整理以现有源码的正确性、独立运行和真实验证为验收依据；Study 20 继续明确保留脚手架状态，不把它标记为 MongoDB 课程完成，也不把本地部署测试表述为线上发布。
 
-补全 Study 20 或增加下一章时，保留独立目录与锁文件；先定义一项可观察的业务问题，再编写源码和成功/失败验证。补齐中文 README 的真实目录、核心机制、推荐阅读顺序、练习与简化边界，最后把实际完成的章节加入学习路线。
+下一阶段路线：**NestJS 开源项目实战 → TypeScript 全栈实践 → LangChain.js → LangGraph.js → AI Agent 产品开发**。先在开源项目中阅读模块边界、测试、真实持久化和任务生命周期，再把已学机制用于完整的 Agent 产品。本次不新增这些方向的项目。
+
+MongoDB、GraphQL、消息代理等未实现内容可按实际需要补学。新增 Study 时继续保持独立目录、锁文件、中文说明和可验证的业务目标；不需要为共享几行代码改造成统一应用。
 
 参考：[NestJS 英文文档](https://docs.nestjs.com/)、[NestJS 中文文档](https://docs.nestjs.cn/introduction/)。参考文档有助于理解机制，版本相关行为仍以项目安装版本和测试为准。
