@@ -1,132 +1,108 @@
-<p align="center">
-  <a href="http://nestjs.com/" target="blank"><img src="https://nestjs.com/img/logo-small.svg" width="120" alt="Nest Logo" /></a>
-</p>
+# NestJS Study 40：角色、权限与 CASL 授权
 
-[circleci-image]: https://img.shields.io/circleci/build/github/nestjs/nest/master?token=abc123def456
-[circleci-url]: https://circleci.com/gh/nestjs/nest
+以多用户 Agent 管理为例，对比三种授权粒度：管理员角色、功能权限、具体资源条件。本章重点是授权，使用固定公开的教学 Token 映射服务端用户；它不提供真实登录、JWT 签名、过期或撤销能力。真实 JWT 认证请先看 Study 39。
 
-  <p align="center">A progressive <a href="http://nodejs.org" target="_blank">Node.js</a> framework for building efficient and scalable server-side applications.</p>
-    <p align="center">
-<a href="https://www.npmjs.com/~nestjscore" target="_blank"><img src="https://img.shields.io/npm/v/@nestjs/core.svg" alt="NPM Version" /></a>
-<a href="https://www.npmjs.com/~nestjscore" target="_blank"><img src="https://img.shields.io/npm/l/@nestjs/core.svg" alt="Package License" /></a>
-<a href="https://www.npmjs.com/~nestjscore" target="_blank"><img src="https://img.shields.io/npm/dm/@nestjs/common.svg" alt="NPM Downloads" /></a>
-<a href="https://circleci.com/gh/nestjs/nest" target="_blank"><img src="https://img.shields.io/circleci/build/github/nestjs/nest/master" alt="CircleCI" /></a>
-<a href="https://discord.gg/G7Qnnhy" target="_blank"><img src="https://img.shields.io/badge/discord-online-brightgreen.svg" alt="Discord"/></a>
-<a href="https://opencollective.com/nest#backer" target="_blank"><img src="https://opencollective.com/nest/backers/badge.svg" alt="Backers on Open Collective" /></a>
-<a href="https://opencollective.com/nest#sponsor" target="_blank"><img src="https://opencollective.com/nest/sponsors/badge.svg" alt="Sponsors on Open Collective" /></a>
-  <a href="https://paypal.me/kamilmysliwiec" target="_blank"><img src="https://img.shields.io/badge/Donate-PayPal-ff3f59.svg" alt="Donate us"/></a>
-    <a href="https://opencollective.com/nest#sponsor"  target="_blank"><img src="https://img.shields.io/badge/Support%20us-Open%20Collective-41B883.svg" alt="Support us"></a>
-  <a href="https://twitter.com/nestframework" target="_blank"><img src="https://img.shields.io/twitter/follow/nestframework.svg?style=social&label=Follow" alt="Follow us on Twitter"></a>
-</p>
-  <!--[![Backers on Open Collective](https://opencollective.com/nest/backers/badge.svg)](https://opencollective.com/nest#backer)
-  [![Sponsors on Open Collective](https://opencollective.com/nest/sponsors/badge.svg)](https://opencollective.com/nest#sponsor)-->
+## 核心知识与业务场景
 
-## Description
+- `@Roles()` + `RolesGuard`：管理后台只允许管理员。
+- `@RequirePermissions()` + `PermissionsGuard`：通过 `ROLE_PERMISSIONS` 判断是否拥有创建、更新等功能权限。
+- `@CheckPolicies()` + `PoliciesGuard`：声明路由级策略，如能否创建 Agent。
+- `CaslAbilityFactory`：在 Service 中对已经加载的 `Agent` 实例判断所有权和状态。
+- `MockAuthGuard` 必须先建立可信的教学身份，再运行授权 Guard；客户端的 `role`、`ownerId` 或 `X-Role` 都不会成为身份来源。
 
-[Nest](https://github.com/nestjs/nest) framework TypeScript starter repository.
+## 结构与阅读顺序
 
-## Project setup
-
-```bash
-$ pnpm install
+```text
+src/
+├── app.module.ts                     # 注册业务模块与 APP_PIPE
+├── authorization/
+│   ├── authorization.module.ts       # 注册和导出 Guard、Ability 工厂
+│   ├── mock-auth.guard.ts            # 固定 Token → 服务端用户
+│   ├── roles.guard.ts
+│   ├── permissions.guard.ts
+│   ├── policies.guard.ts
+│   ├── casl-ability.factory.ts        # 所有权、管理员和运行状态规则
+│   └── role-permissions.ts
+├── agents/
+│   ├── agent.entity.ts               # CASL 的实际资源类型
+│   ├── agents.controller.ts
+│   └── agents.service.ts
+├── admin/admin.controller.ts
+└── users/users.service.ts
 ```
 
-## Compile and run the project
+推荐 `app.module.ts → authorization.module.ts → mock-auth.guard.ts → agents.controller.ts → role-permissions.ts → casl-ability.factory.ts → agents.service.ts → admin.controller.ts`。先跟踪身份与 Guard 顺序，再比较路由级权限和资源级条件。
 
-```bash
-# development
-$ pnpm run start
+## 为什么还要在 Service 判断资源？
 
-# watch mode
-$ pnpm run start:dev
+普通用户都具有 `agent:update`，这不代表能更新任何人的 Agent。Service 找到资源之后执行 `ability.can(Action.Update, agent)`，才能把 `ownerId` 条件带入判断。创建时 `ownerId` 来自服务端身份，DTO 不允许写入它。
 
-# production mode
-$ pnpm run start:prod
+内存记录通过 `new Agent()` 创建实例，让 CASL 的 `detectSubjectType` 能识别类型。管理员可以管理全部资源，但最后声明的 `cannot(Delete, Agent, { status: 'running' })` 仍禁止删除运行中的 Agent。不要仅对 `Agent` 类判断所有权，资源实例才有 owner 和 status。
+
+```mermaid
+flowchart TD
+  A[Bearer 教学 Token] --> B[MockAuthGuard 查服务端用户]
+  B --> C[PermissionsGuard 或 RolesGuard]
+  C --> D[PoliciesGuard 路由策略]
+  D --> E[AgentsService 加载 Agent 实例]
+  E --> F[CASL 检查 ownerId 和 status]
 ```
 
-## Run tests
+## 启动与接口
+
+需要 Node.js 24、pnpm；不需要 `.env`、数据库、Redis 或真实 AI API。NestJS 12、TypeScript 6。
 
 ```bash
-# unit tests
-$ pnpm run test
-
-# e2e tests
-$ pnpm run test:e2e
-
-# test coverage
-$ pnpm run test:cov
+pnpm install --frozen-lockfile
+pnpm start:dev
 ```
 
-## Deployment
+默认端口 3000。可用 `PORT=3001 pnpm start:dev` 更换端口。
 
-When you're ready to deploy your NestJS application to production, there are some key steps you can take to ensure it runs as efficiently as possible. Check out the [deployment documentation](https://docs.nestjs.com/deployment) for more information.
+| Method | 路由 | 验证内容 |
+|---|---|---|
+| GET | `/` | 保留的 Hello World 入口 |
+| GET | `/agents` | 普通用户自己的资源；管理员所有资源 |
+| GET | `/agents/my` | 当前用户自己的资源 |
+| POST | `/agents` | 按认证用户创建 |
+| PATCH | `/agents/:id` | 只能修改自己有权限的资源 |
+| DELETE | `/agents/:id` | 有权限且不在运行中才能删除 |
+| POST | `/agents/:id/run` | 资源级执行检查，1 秒模拟 |
+| GET | `/admin/users` | 仅管理员，返回不含哈希的用户 |
+| GET | `/admin/stats` | 仅管理员统计 |
 
-If you are looking for a cloud-based platform to deploy your NestJS application, check out [Mau](https://mau.nestjs.com), our official platform for deploying NestJS applications on AWS. Mau makes deployment straightforward and fast, requiring just a few simple steps:
+公开教学 Token 为 `demo-robin-token`、`demo-alan-token`、`demo-admin-token`，分别映射用户 1001、1002、1003。知道这些固定值即可扮演教学身份，所以只能用于本地学习。
 
 ```bash
-$ pnpm install -g @nestjs/mau
-$ mau deploy
+curl -i http://localhost:3000/agents
+curl http://localhost:3000/agents -H 'Authorization: Bearer demo-robin-token'
+curl -i http://localhost:3000/admin/users -H 'Authorization: Bearer demo-robin-token'
+curl http://localhost:3000/admin/users -H 'Authorization: Bearer demo-admin-token'
+curl -i -X PATCH http://localhost:3000/agents/3 \
+  -H 'Authorization: Bearer demo-robin-token' -H 'Content-Type: application/json' \
+  -d '{"name":"Cannot edit another owner"}'
+curl -i -X DELETE http://localhost:3000/agents/2 -H 'Authorization: Bearer demo-admin-token'
+curl -X POST http://localhost:3000/agents -H 'Authorization: Bearer demo-robin-token' \
+  -H 'Content-Type: application/json' -d '{"name":"My Agent","model":"mock"}'
 ```
 
-With Mau, you can deploy your application in just a few clicks, allowing you to focus on building features rather than managing infrastructure.
-
-## Observability
-
-In production applications, observability is essential for understanding how your system behaves, detecting issues early, and maintaining reliable performance.
-
-[NestJS Observe](https://observe.nestjs.com) automatically instruments your NestJS application, giving you deep visibility into your system with minimal setup:
-
-- **Distributed tracing:** Follow requests across services and understand how they flow through your system.
-- **Waterfall analysis:** Visualize request execution and identify slow operations, bottlenecks, and unexpected delays.
-- **Performance analysis:** Analyze application performance in real time and quickly pinpoint areas that need optimization.
-- **Metrics:** Track key application and infrastructure metrics to understand system health and performance trends.
-- **Logging:** Centralize and correlate logs with traces and other telemetry to make debugging easier.
-- **Error tracking:** Detect errors quickly and investigate their root causes with the surrounding context.
-- **SLA monitoring:** Track service-level objectives and identify when your application is approaching or exceeding defined thresholds.
-- **Alarms and alerts:** Set up alerts for critical errors, performance degradation, SLA violations, and other anomalies so your team can react quickly.
-
-To add it to this project, run this and approve the code it prints at [observe.nestjs.com/link](https://observe.nestjs.com/link) - signing up for free if you have no account:
+预期未认证 401、普通用户访问后台 403、管理员后台 200、跨用户更新 403、管理员删除正在运行的 Agent 2 也为 403、合法创建 201。PATCH 的 `null` 和创建时注入 `ownerId` 都返回 400。
 
 ```bash
-$ npx @nestjs/observe link
+pnpm exec tsc --noEmit --incremental false
+pnpm lint
+pnpm test
+pnpm test:e2e
+pnpm build
+pnpm start:prod
 ```
 
-It installs `@nestjs/observe`, wires it into `AppModule` and `main.ts`, and writes the app key and secret into `.env`, which every `nest start` script (`start`, `start:dev`, `start:debug`) then loads. In production, set `OBSERVE_APP_KEY` and `OBSERVE_APP_SECRET` in the environment instead.
+CASL 单测验证允许与拒绝规则；HTTP E2E 验证真实 Guard 注册、角色伪造、资源所有权与 DTO。E2E 先构建再启动真实应用。
 
-Or do it by hand:
+## 限制、练习与总结
 
-```bash
-$ pnpm install @nestjs/observe
-```
+数据只在内存中，已有 Agent 2 用固定 `running` 状态展示禁止删除规则。当前没有持久化、真实认证和用户管理写接口；`UsersService` 的哈希示例保留，但 Mock Token 流程不验证密码。
 
-Then follow the [setup guide](https://docs.nestjs.com/observability/sdk) - it takes a single import and an app key.
+练习：新增一个只读角色；为一个接口增加新的功能权限；增加“仅管理员能修改某字段”的资源规则。重点是不要把“拥有功能权限”误认为“拥有每条资源”。
 
-The free plan needs no payment details and covers 300,000 events a month. You can also browse the [live demo](https://www.observe-demo.nestjs.com/dashboard) first - the whole dashboard over a busy service's data, with nothing to install.
-
-## Resources
-
-Check out a few resources that may come in handy when working with NestJS:
-
-- Visit the [NestJS Documentation](https://docs.nestjs.com) to learn more about the framework.
-- For questions and support, please visit our [Discord channel](https://discord.gg/G7Qnnhy).
-- To dive deeper and get more hands-on experience, check out our official video [courses](https://courses.nestjs.com/).
-- Deploy your application to AWS with the help of [NestJS Mau](https://mau.nestjs.com) in just a few clicks.
-- Auto-instrument your application with [NestJS Observe](https://observe.nestjs.com). Distributed tracing, metrics, and logging made easy. Error tracking and performance monitoring for your NestJS applications.
-- Visualize your application graph and interact with the NestJS application in real-time using [NestJS Devtools](https://devtools.nestjs.com).
-- Need help with your project (part-time to full-time)? Check out our official [enterprise support](https://enterprise.nestjs.com).
-- To stay in the loop and get updates, follow us on [X](https://x.com/nestframework) and [LinkedIn](https://linkedin.com/company/nestjs).
-- Looking for a job, or have a job to offer? Check out our official [Jobs board](https://jobs.nestjs.com).
-
-## Support
-
-Nest is an MIT-licensed open source project. It can grow thanks to the sponsors and support by the amazing backers. If you'd like to join them, please [read more here](https://docs.nestjs.com/support).
-
-## Stay in touch
-
-- Author - [Kamil Myśliwiec](https://twitter.com/kammysliwiec)
-- Website - [https://nestjs.com](https://nestjs.com/)
-- Twitter - [@nestframework](https://twitter.com/nestframework)
-
-## License
-
-Nest is [MIT licensed](https://github.com/nestjs/nest/blob/master/LICENSE).
+参考：[中文授权文档](https://docs.nestjs.cn/security/authorization/)、[官方授权文档](https://docs.nestjs.com/security/authorization)。
