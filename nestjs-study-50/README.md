@@ -1,132 +1,114 @@
-<p align="center">
-  <a href="http://nestjs.com/" target="blank"><img src="https://nestjs.com/img/logo-small.svg" width="120" alt="Nest Logo" /></a>
-</p>
+# NestJS Study 50：Standalone Applications 与研究 CLI
 
-[circleci-image]: https://img.shields.io/circleci/build/github/nestjs/nest/master?token=abc123def456
-[circleci-url]: https://circleci.com/gh/nestjs/nest
+学习 NestJS 不只为了编写 HTTP API。本章复用 Module、Provider 和依赖注入，创建不监听 HTTP 端口的 Application Context，运行研究报告生成和知识库预处理两个一次性命令。
 
-  <p align="center">A progressive <a href="http://nodejs.org" target="_blank">Node.js</a> framework for building efficient and scalable server-side applications.</p>
-    <p align="center">
-<a href="https://www.npmjs.com/~nestjscore" target="_blank"><img src="https://img.shields.io/npm/v/@nestjs/core.svg" alt="NPM Version" /></a>
-<a href="https://www.npmjs.com/~nestjscore" target="_blank"><img src="https://img.shields.io/npm/l/@nestjs/core.svg" alt="Package License" /></a>
-<a href="https://www.npmjs.com/~nestjscore" target="_blank"><img src="https://img.shields.io/npm/dm/@nestjs/common.svg" alt="NPM Downloads" /></a>
-<a href="https://circleci.com/gh/nestjs/nest" target="_blank"><img src="https://img.shields.io/circleci/build/github/nestjs/nest/master" alt="CircleCI" /></a>
-<a href="https://discord.gg/G7Qnnhy" target="_blank"><img src="https://img.shields.io/badge/discord-online-brightgreen.svg" alt="Discord"/></a>
-<a href="https://opencollective.com/nest#backer" target="_blank"><img src="https://opencollective.com/nest/backers/badge.svg" alt="Backers on Open Collective" /></a>
-<a href="https://opencollective.com/nest#sponsor" target="_blank"><img src="https://opencollective.com/nest/sponsors/badge.svg" alt="Sponsors on Open Collective" /></a>
-  <a href="https://paypal.me/kamilmysliwiec" target="_blank"><img src="https://img.shields.io/badge/Donate-PayPal-ff3f59.svg" alt="Donate us"/></a>
-    <a href="https://opencollective.com/nest#sponsor"  target="_blank"><img src="https://img.shields.io/badge/Support%20us-Open%20Collective-41B883.svg" alt="Support us"></a>
-  <a href="https://twitter.com/nestframework" target="_blank"><img src="https://img.shields.io/twitter/follow/nestframework.svg?style=social&label=Follow" alt="Follow us on Twitter"></a>
-</p>
-  <!--[![Backers on Open Collective](https://opencollective.com/nest/backers/badge.svg)](https://opencollective.com/nest#backer)
-  [![Sponsors on Open Collective](https://opencollective.com/nest/sponsors/badge.svg)](https://opencollective.com/nest#sponsor)-->
+## 学习目标
 
-## Description
+- 理解 `createApplicationContext()` 与 `NestFactory.create()` 的区别。
+- 从容器中用 `app.get()` 取得业务 Service，并在命令结束时关闭上下文。
+- 将 CLI 参数解析、模型配置、研究步骤和本地文件保存分开。
+- 根据退出码判断命令是否成功，避免后台资源让命令一直不退出。
 
-[Nest](https://github.com/nestjs/nest) framework TypeScript starter repository.
+## 项目结构
 
-## Project setup
-
-```bash
-$ pnpm install
+```text
+src/
+├── cli/main.ts
+├── main.ts
+├── app.module.ts
+├── models/
+│   ├── models.module.ts
+│   └── models.service.ts
+├── research/
+│   ├── research.module.ts
+│   ├── research.service.ts
+│   └── report-storage.service.ts
+└── knowledge/
+    ├── knowledge.module.ts
+    ├── knowledge.service.ts
+    └── documents.ts
 ```
 
-## Compile and run the project
+先读 [CLI 入口](./src/cli/main.ts)，定位创建上下文、获取 Service 和 `finally` 里的 `app.close()`；然后读 [AppModule](./src/app.module.ts) 及模块导出。研究分支从 [ResearchService](./src/research/research.service.ts) 读到 [ReportStorageService](./src/research/report-storage.service.ts)，知识库分支从 [documents](./src/knowledge/documents.ts) 读到 [KnowledgeService](./src/knowledge/knowledge.service.ts)。
 
-```bash
-# development
-$ pnpm run start
+## 命令执行流程
 
-# watch mode
-$ pnpm run start:dev
-
-# production mode
-$ pnpm run start:prod
+```mermaid
+flowchart TD
+    A[创建 Application Context] --> B[解析命令行参数]
+    B --> C{命令}
+    C -->|research| D[ModelsService / ResearchService]
+    D --> E[生成模拟 Markdown 并保存]
+    C -->|knowledge:build| F[内置文档转模拟向量]
+    C -->|缺参数或未知命令| G[抛出可读错误]
+    E --> H[finally 关闭 Context]
+    F --> H
+    G --> H
+    H --> I[成功退出 0 / 错误退出 1]
 ```
 
-## Run tests
+入口创建 Context 并解析命令参数，不会开启 HTTP。`ResearchModule` 导出 ResearchService，内部的 ModelsModule 提供模型标签，StorageService 用 UUID 文件名将报告写到当前工作目录的 `reports/`。
+
+研究步骤用三次 500ms 延迟模拟 planning、analysis 和报告生成。KnowledgeService 处理三个内置文档，生成固定三维数值；它没有调用 Embedding API、向量数据库或 LangChain。
+
+## 安装和运行
+
+使用 Node.js 24、pnpm 12，NestJS 12.3.3。所有数据与模型均为本地 Mock，不需要收费账户、数据库、Redis 或环境密钥。
 
 ```bash
-# unit tests
-$ pnpm run test
-
-# e2e tests
-$ pnpm run test:e2e
-
-# test coverage
-$ pnpm run test:cov
+pnpm install --frozen-lockfile
+pnpm research "NestJS Application Context 的使用场景"
+pnpm knowledge:build
 ```
 
-## Deployment
-
-When you're ready to deploy your NestJS application to production, there are some key steps you can take to ensure it runs as efficiently as possible. Check out the [deployment documentation](https://docs.nestjs.com/deployment) for more information.
-
-If you are looking for a cloud-based platform to deploy your NestJS application, check out [Mau](https://mau.nestjs.com), our official platform for deploying NestJS applications on AWS. Mau makes deployment straightforward and fast, requiring just a few simple steps:
+也可以从统一 CLI 入口传入命令：
 
 ```bash
-$ pnpm install -g @nestjs/mau
-$ mau deploy
+pnpm cli research "TypeScript 后端模块设计"
+pnpm cli knowledge:build
 ```
 
-With Mau, you can deploy your application in just a few clicks, allowing you to focus on building features rather than managing infrastructure.
+这些快捷脚本会先执行 `pnpm build`，再用 Node.js 运行 `dist/cli/main.js`。Nest 依靠 TypeScript 发出的构造器装饰器元数据推断注入 Token；直接用 `tsx` 转译此入口不会发出这些元数据，可能让 Service 的依赖变成 `undefined`。本章保留框架编译流程，不为绕过构建而修改各个业务 Service。
 
-## Observability
+运行研究命令后应看到成功日志，`reports/` 内新增 `research-随机UUID.md`。知识库命令应打印处理三个文档、生成三个 Chunk 和三个模拟向量，然后退出。
 
-In production applications, observability is essential for understanding how your system behaves, detecting issues early, and maintaining reliable performance.
-
-[NestJS Observe](https://observe.nestjs.com) automatically instruments your NestJS application, giving you deep visibility into your system with minimal setup:
-
-- **Distributed tracing:** Follow requests across services and understand how they flow through your system.
-- **Waterfall analysis:** Visualize request execution and identify slow operations, bottlenecks, and unexpected delays.
-- **Performance analysis:** Analyze application performance in real time and quickly pinpoint areas that need optimization.
-- **Metrics:** Track key application and infrastructure metrics to understand system health and performance trends.
-- **Logging:** Centralize and correlate logs with traces and other telemetry to make debugging easier.
-- **Error tracking:** Detect errors quickly and investigate their root causes with the surrounding context.
-- **SLA monitoring:** Track service-level objectives and identify when your application is approaching or exceeding defined thresholds.
-- **Alarms and alerts:** Set up alerts for critical errors, performance degradation, SLA violations, and other anomalies so your team can react quickly.
-
-To add it to this project, run this and approve the code it prints at [observe.nestjs.com/link](https://observe.nestjs.com/link) - signing up for free if you have no account:
+## 构建与验证
 
 ```bash
-$ npx @nestjs/observe link
+pnpm build
+node dist/cli/main.js research "NestJS 独立应用"
+node dist/cli/main.js knowledge:build
+pnpm exec tsc --noEmit --incremental false
+pnpm lint
+pnpm test
+pnpm test:e2e
 ```
 
-It installs `@nestjs/observe`, wires it into `AppModule` and `main.ts`, and writes the app key and secret into `.env`, which every `nest start` script (`start`, `start:dev`, `start:debug`) then loads. In production, set `OBSERVE_APP_KEY` and `OBSERVE_APP_SECRET` in the environment instead.
+E2E 直接启动构建后的 CLI 子进程，在测试专属临时目录生成报告、检查 Markdown 内容，验证知识库输出以及正常退出；缺少 topic、未知命令必须返回退出码 1。另在隔离的源码/配置副本中执行真正的 `pnpm research` 和 `pnpm knowledge:build`，验证快捷入口的构建与注入。测试不会写入学习者已有的 reports 文件。
 
-Or do it by hand:
+手动验证错误输入：
 
 ```bash
-$ pnpm install @nestjs/observe
+node dist/cli/main.js research
+node dist/cli/main.js unknown
 ```
 
-Then follow the [setup guide](https://docs.nestjs.com/observability/sdk) - it takes a single import and an app key.
+应分别显示“请提供研究主题”和未知命令提示，命令状态为失败。它们是有意的错误案例，不是正常运行应当成功的命令。
 
-The free plan needs no payment details and covers 300,000 events a month. You can also browse the [live demo](https://www.observe-demo.nestjs.com/dashboard) first - the whole dashboard over a busy service's data, with nothing to install.
+`pnpm start:dev` 与 `pnpm start:prod` 使用保留的 HTTP 启动入口 `src/main.ts`，并不是 CLI。这份 AppModule 没有注册 HTTP Controller，因此不会提供示例研究 REST API。学习本章应运行上面的 CLI 命令，而不是用 curl 访问一个虚构接口。
 
-## Resources
+## 已知限制
 
-Check out a few resources that may come in handy when working with NestJS:
+- 报告写入相对于启动命令的工作目录；从其他目录运行构建产物时，reports 也位于那个目录。
+- UUID 文件名避免将用户 topic 当作文件路径；模拟内容仍未经知识检索和事实核对。
+- 模型名称只是配置示例，向量只是固定数值，没有真实 AI 能力。
+- Application Context 不会自动运行 HTTP 路由的 Pipe、Guard 或 Interceptor；CLI 输入由入口自己检查。
+- 生成文件位于本地，`reports/` 已忽略，不作为源码提交。
 
-- Visit the [NestJS Documentation](https://docs.nestjs.com) to learn more about the framework.
-- For questions and support, please visit our [Discord channel](https://discord.gg/G7Qnnhy).
-- To dive deeper and get more hands-on experience, check out our official video [courses](https://courses.nestjs.com/).
-- Deploy your application to AWS with the help of [NestJS Mau](https://mau.nestjs.com) in just a few clicks.
-- Auto-instrument your application with [NestJS Observe](https://observe.nestjs.com). Distributed tracing, metrics, and logging made easy. Error tracking and performance monitoring for your NestJS applications.
-- Visualize your application graph and interact with the NestJS application in real-time using [NestJS Devtools](https://devtools.nestjs.com).
-- Need help with your project (part-time to full-time)? Check out our official [enterprise support](https://enterprise.nestjs.com).
-- To stay in the loop and get updates, follow us on [X](https://x.com/nestframework) and [LinkedIn](https://linkedin.com/company/nestjs).
-- Looking for a job, or have a job to offer? Check out our official [Jobs board](https://jobs.nestjs.com).
+## 练习与阶段总结
 
-## Support
+练习：增加一个只打印可用模型的命令；给报告增加生成时间；新增一篇内置文档比较向量数量；在 Service 中观察生命周期钩子与 `app.close()` 的关系。
 
-Nest is an MIT-licensed open source project. It can grow thanks to the sponsors and support by the amazing backers. If you'd like to join them, please [read more here](https://docs.nestjs.com/support).
+本章串起 Module、Provider、依赖注入和生命周期，说明这些概念可以用于脚本、迁移、定时离线任务。后续可以进入开源 NestJS 项目、TypeScript 全栈与 Agent 实战；本项目没有提前实现 LangChain.js 或 LangGraph.js 集成。
 
-## Stay in touch
-
-- Author - [Kamil Myśliwiec](https://twitter.com/kammysliwiec)
-- Website - [https://nestjs.com](https://nestjs.com/)
-- Twitter - [@nestframework](https://twitter.com/nestframework)
-
-## License
-
-Nest is [MIT licensed](https://github.com/nestjs/nest/blob/master/LICENSE).
+参考：[NestJS Standalone Applications](https://docs.nestjs.com/standalone-applications)。
