@@ -1,0 +1,46 @@
+services:
+  api:
+    build:
+      context: .
+      dockerfile: Dockerfile
+
+    image: nestjs-study-49:latest
+
+    environment:
+      NODE_ENV: production
+      PORT: 3000
+
+    expose:
+      - "3000"
+
+    restart: unless-stopped
+
+    healthcheck:
+      test:
+        - CMD
+        - node
+        - -e
+        - >
+          fetch('http://127.0.0.1:3000/health')
+            .then(r => process.exit(r.ok ? 0 : 1))
+            .catch(() => process.exit(1))
+
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 15s
+
+  nginx:
+    image: nginx:stable-alpine
+
+    ports:
+      - "8080:80"
+
+    volumes:
+      - ./deploy/nginx/default.conf:/etc/nginx/conf.d/default.conf:ro
+
+    depends_on:
+      api:
+        condition: service_healthy
+
+    restart: unless-stopped
