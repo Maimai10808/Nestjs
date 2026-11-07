@@ -1,132 +1,101 @@
-<p align="center">
-  <a href="http://nestjs.com/" target="blank"><img src="https://nestjs.com/img/logo-small.svg" width="120" alt="Nest Logo" /></a>
-</p>
+# NestJS Study 46：WebSocket 中的 Guard、Pipe、Interceptor 与 Filter
 
-[circleci-image]: https://img.shields.io/circleci/build/github/nestjs/nest/master?token=abc123def456
-[circleci-url]: https://circleci.com/gh/nestjs/nest
+模拟带用户身份的 Coding Agent 平台。三个演示 Token 在服务端映射为两个普通用户和一个管理员，用同一个 Socket.IO Gateway 展示消息执行前后的四类扩展点。
 
-  <p align="center">A progressive <a href="http://nodejs.org" target="_blank">Node.js</a> framework for building efficient and scalable server-side applications.</p>
-    <p align="center">
-<a href="https://www.npmjs.com/~nestjscore" target="_blank"><img src="https://img.shields.io/npm/v/@nestjs/core.svg" alt="NPM Version" /></a>
-<a href="https://www.npmjs.com/~nestjscore" target="_blank"><img src="https://img.shields.io/npm/l/@nestjs/core.svg" alt="Package License" /></a>
-<a href="https://www.npmjs.com/~nestjscore" target="_blank"><img src="https://img.shields.io/npm/dm/@nestjs/common.svg" alt="NPM Downloads" /></a>
-<a href="https://circleci.com/gh/nestjs/nest" target="_blank"><img src="https://img.shields.io/circleci/build/github/nestjs/nest/master" alt="CircleCI" /></a>
-<a href="https://discord.gg/G7Qnnhy" target="_blank"><img src="https://img.shields.io/badge/discord-online-brightgreen.svg" alt="Discord"/></a>
-<a href="https://opencollective.com/nest#backer" target="_blank"><img src="https://opencollective.com/nest/backers/badge.svg" alt="Backers on Open Collective" /></a>
-<a href="https://opencollective.com/nest#sponsor" target="_blank"><img src="https://opencollective.com/nest/sponsors/badge.svg" alt="Sponsors on Open Collective" /></a>
-  <a href="https://paypal.me/kamilmysliwiec" target="_blank"><img src="https://img.shields.io/badge/Donate-PayPal-ff3f59.svg" alt="Donate us"/></a>
-    <a href="https://opencollective.com/nest#sponsor"  target="_blank"><img src="https://img.shields.io/badge/Support%20us-Open%20Collective-41B883.svg" alt="Support us"></a>
-  <a href="https://twitter.com/nestframework" target="_blank"><img src="https://img.shields.io/twitter/follow/nestframework.svg?style=social&label=Follow" alt="Follow us on Twitter"></a>
-</p>
-  <!--[![Backers on Open Collective](https://opencollective.com/nest/backers/badge.svg)](https://opencollective.com/nest#backer)
-  [![Sponsors on Open Collective](https://opencollective.com/nest/sponsors/badge.svg)](https://opencollective.com/nest#sponsor)-->
+## 学习目标
 
-## Description
+- Guard 决定消息是否可以进入业务处理，不能信任客户端传来的 role。
+- Pipe 将消息体校验为 DTO，防止缺失字段和额外字段流入 Service。
+- Interceptor 记录处理过程与耗时，Filter 统一 WebSocket 错误事件。
+- 将任务保存在用户名下，验证两个连接之间的数据隔离。
 
-[Nest](https://github.com/nestjs/nest) framework TypeScript starter repository.
+## 源码入口
 
-## Project setup
-
-```bash
-$ pnpm install
+```text
+src/
+├── app.module.ts
+├── main.ts
+├── auth/
+│   ├── auth.service.ts
+│   ├── ws-auth.guard.ts
+│   └── ws-admin.guard.ts
+├── agents/
+│   ├── agents.gateway.ts
+│   ├── agents.service.ts
+│   ├── agents.module.ts
+│   └── dto/execute-agent.dto.ts
+└── common/
+    ├── pipes/ws-validation.pipe.ts
+    ├── interceptors/ws-logging.interceptor.ts
+    └── filters/ws-exception.filter.ts
+client/test-client.ts
 ```
 
-## Compile and run the project
+建议先看 [Gateway](./src/agents/agents.gateway.ts) 上绑定了哪些装饰器，再看 [AgentsModule](./src/agents/agents.module.ts) 和 [AuthModule](./src/auth/auth.module.ts) 如何注册依赖。随后依次读认证 Guard、DTO/Pipe、Service、Interceptor 和 Filter，最后运行客户端。
 
-```bash
-# development
-$ pnpm run start
+## 一条消息经过什么
 
-# watch mode
-$ pnpm run start:dev
-
-# production mode
-$ pnpm run start:prod
+```mermaid
+flowchart LR
+    A[Socket.IO 消息] --> B[WsAuthGuard]
+    B --> C[管理员消息的 WsAdminGuard]
+    C --> D[WsLoggingInterceptor 进入]
+    D --> E[execute 消息的 WsValidationPipe]
+    E --> F[Gateway / AgentsService]
+    F --> G[agent.result 与 ACK]
+    G --> H[Interceptor 完成]
+    B -->|异常| I[WsExceptionFilter]
+    E -->|异常| I
+    I --> J[exception 事件]
 ```
 
-## Run tests
+认证 Guard 在每条消息上读取 `client.handshake.auth.token`，到 [AuthService](./src/auth/auth.service.ts) 的 Map 查询用户，再写入 `client.data.user`。管理员 Guard 读取这个服务端身份，不读取消息体的 role。`agent.status` 调用 `findByUser()`，只能得到当前用户的任务。
+
+[WsValidationPipe](./src/common/pipes/ws-validation.pipe.ts) 启用 transform、whitelist 和 forbidNonWhitelisted。执行消息的 prompt 长度 5～500，model 仅允许 `gpt-4.1` 或 `claude-sonnet`；这两个名称只是模拟任务标签，没有真实模型调用。
+
+Filter 把 `WsException` 转成 `exception` 事件；目前统一返回 `code: WS_ERROR` 和可读 message。Pipe 内部的 `VALIDATION_ERROR/details` 不会原样对外传出。异常请求通常没有成功 ACK，客户端应监听 `exception`，不能一直等 ACK。
+
+## 运行与手动验证
+
+Node.js 24、pnpm 12，NestJS 12.3.3。无需外部服务、JWT 密钥或 AI API Key。
 
 ```bash
-# unit tests
-$ pnpm run test
-
-# e2e tests
-$ pnpm run test:e2e
-
-# test coverage
-$ pnpm run test:cov
+pnpm install --frozen-lockfile
+pnpm start:dev
 ```
 
-## Deployment
-
-When you're ready to deploy your NestJS application to production, there are some key steps you can take to ensure it runs as efficiently as possible. Check out the [deployment documentation](https://docs.nestjs.com/deployment) for more information.
-
-If you are looking for a cloud-based platform to deploy your NestJS application, check out [Mau](https://mau.nestjs.com), our official platform for deploying NestJS applications on AWS. Mau makes deployment straightforward and fast, requiring just a few simple steps:
+新终端运行：
 
 ```bash
-$ pnpm install -g @nestjs/mau
-$ mau deploy
+pnpm exec tsx client/test-client.ts
 ```
 
-With Mau, you can deploy your application in just a few clicks, allowing you to focus on building features rather than managing infrastructure.
+客户端访问固定 `http://localhost:3000`，携带 `demo-robin-token`，启动任务、收到结果后查询自己的任务并断开。服务端也固定监听 3000；一次运行一个 Study。
 
-## Observability
+| 消息 | 参数 | 结果 |
+| --- | --- | --- |
+| `agent.execute` | `{"prompt":"分析 TypeScript 类型错误","model":"gpt-4.1"}` | `agent.result` 推送和包含 taskId 的 ACK |
+| `agent.status` | 无需业务参数 | 当前用户任务数组 |
+| `agent.admin.stats` | 无需业务参数 | 仅管理员可查询任务统计 |
 
-In production applications, observability is essential for understanding how your system behaves, detecting issues early, and maintaining reliable performance.
-
-[NestJS Observe](https://observe.nestjs.com) automatically instruments your NestJS application, giving you deep visibility into your system with minimal setup:
-
-- **Distributed tracing:** Follow requests across services and understand how they flow through your system.
-- **Waterfall analysis:** Visualize request execution and identify slow operations, bottlenecks, and unexpected delays.
-- **Performance analysis:** Analyze application performance in real time and quickly pinpoint areas that need optimization.
-- **Metrics:** Track key application and infrastructure metrics to understand system health and performance trends.
-- **Logging:** Centralize and correlate logs with traces and other telemetry to make debugging easier.
-- **Error tracking:** Detect errors quickly and investigate their root causes with the surrounding context.
-- **SLA monitoring:** Track service-level objectives and identify when your application is approaching or exceeding defined thresholds.
-- **Alarms and alerts:** Set up alerts for critical errors, performance degradation, SLA violations, and other anomalies so your team can react quickly.
-
-To add it to this project, run this and approve the code it prints at [observe.nestjs.com/link](https://observe.nestjs.com/link) - signing up for free if you have no account:
+把客户端 Token 改为 `demo-alan-token`，应查不到 robin 的任务；改为 `demo-admin-token` 才能查询统计。错误 Token 仍可能建立连接，但发送受保护消息时会被 Guard 拒绝。将 model 改为未知值可观察 Pipe 与 Filter。
 
 ```bash
-$ npx @nestjs/observe link
+pnpm build
+pnpm exec tsc --noEmit --incremental false
+pnpm lint
+pnpm test
+pnpm test:e2e
 ```
 
-It installs `@nestjs/observe`, wires it into `AppModule` and `main.ts`, and writes the app key and secret into `.env`, which every `nest start` script (`start`, `start:dev`, `start:debug`) then loads. In production, set `OBSERVE_APP_KEY` and `OBSERVE_APP_SECRET` in the environment instead.
+E2E 启动真实 Socket.IO 服务，验证认证拒绝、DTO 拒绝、执行结果、用户隔离、普通用户伪造 role 无效、管理员统计。没有把 Guard 或 Service 替换为假实现。
 
-Or do it by hand:
+## 教学边界
 
-```bash
-$ pnpm install @nestjs/observe
-```
+演示 Token 是写在源码里的公开凭证，任何读者都能使用管理员 Token。这是认证机制的 Mock，不是 JWT 或生产登录方案，也没有过期与撤销。任务仅在内存中保留，进程重启后丢失。客户端看到的 prompt/result 是模拟数据；Interceptor 不记录 Token 和整条消息体。
 
-Then follow the [setup guide](https://docs.nestjs.com/observability/sdk) - it takes a single import and an app key.
+练习：新增一个模型标签并同步 DTO；为管理员增加另一个统计字段；调整 Filter 保留结构化验证详情；解释“握手连接成功”为什么不代表每条消息都获授权。
 
-The free plan needs no payment details and covers 300,000 events a month. You can also browse the [live demo](https://www.observe-demo.nestjs.com/dashboard) first - the whole dashboard over a busy service's data, with nothing to install.
+理解本章后，应能判断扩展点是否真正绑定并运行，而不只是存在一个带装饰器的类。
 
-## Resources
-
-Check out a few resources that may come in handy when working with NestJS:
-
-- Visit the [NestJS Documentation](https://docs.nestjs.com) to learn more about the framework.
-- For questions and support, please visit our [Discord channel](https://discord.gg/G7Qnnhy).
-- To dive deeper and get more hands-on experience, check out our official video [courses](https://courses.nestjs.com/).
-- Deploy your application to AWS with the help of [NestJS Mau](https://mau.nestjs.com) in just a few clicks.
-- Auto-instrument your application with [NestJS Observe](https://observe.nestjs.com). Distributed tracing, metrics, and logging made easy. Error tracking and performance monitoring for your NestJS applications.
-- Visualize your application graph and interact with the NestJS application in real-time using [NestJS Devtools](https://devtools.nestjs.com).
-- Need help with your project (part-time to full-time)? Check out our official [enterprise support](https://enterprise.nestjs.com).
-- To stay in the loop and get updates, follow us on [X](https://x.com/nestframework) and [LinkedIn](https://linkedin.com/company/nestjs).
-- Looking for a job, or have a job to offer? Check out our official [Jobs board](https://jobs.nestjs.com).
-
-## Support
-
-Nest is an MIT-licensed open source project. It can grow thanks to the sponsors and support by the amazing backers. If you'd like to join them, please [read more here](https://docs.nestjs.com/support).
-
-## Stay in touch
-
-- Author - [Kamil Myśliwiec](https://twitter.com/kammysliwiec)
-- Website - [https://nestjs.com](https://nestjs.com/)
-- Twitter - [@nestframework](https://twitter.com/nestframework)
-
-## License
-
-Nest is [MIT licensed](https://github.com/nestjs/nest/blob/master/LICENSE).
+参考：[WebSocket Guards](https://docs.nestjs.com/websockets/guards)、[Gateway](https://docs.nestjs.com/websockets/gateways)。
