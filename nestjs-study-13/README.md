@@ -114,6 +114,7 @@ pnpm start:dev
 ```bash
 pnpm build
 pnpm exec tsc --noEmit
+pnpm lint
 pnpm test
 pnpm test:e2e
 pnpm start:prod

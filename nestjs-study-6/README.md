@@ -49,9 +49,7 @@ test/
 [TransformInterceptor](./src/common/interceptors/transform.interceptor.ts) 则使用 `map` 把成功结果转换为：
 
 ```ts
-{
-  success: (true, data);
-}
+({ success: true, data })
 ```
 
 它只绑定在普通列表、单条查询和创建方法上，缓存、慢请求和异常实验不使用这层包装。统一成功响应并不意味着异常也自动成为同一结构，错误仍由 Nest 的异常处理机制生成。

@@ -125,6 +125,7 @@ pnpm start:dev
 ```bash
 pnpm build
 pnpm exec tsc --noEmit
+pnpm lint
 pnpm test
 pnpm test:e2e
 pnpm start:prod
@@ -185,6 +186,6 @@ curl -i -X POST http://localhost:3000/agent/tools/missing/execute \
 
 本章把自定义装饰器、依赖注入、生命周期和运行时发现连接成一个完整的小型扩展机制。重点是“已注册 Provider + 可读取元数据 + 统一接口”，而不是任意动态加载代码。
 
-前 16 个 Study 到这里形成了一条从 HTTP 请求到模块与 Provider，再到运行生命周期的阅读路线。后续可以在独立新章中探索真实工具调用与认证、任务队列、流式输出等内容；这些目前尚未实现。
+前 16 个 Study 到这里形成了一条从 HTTP 请求到模块与 Provider，再到运行生命周期的阅读路线。后续可继续阅读 [Study 17 配置](../nestjs-study-17/README.md)、[Study 27 队列](../nestjs-study-27/README.md) 和 [Study 38 SSE](../nestjs-study-38/README.md)；这些能力不在本章实现范围。
 
 参考：[官方 DiscoveryService 文档](https://docs.nestjs.com/fundamentals/discovery-service)。
