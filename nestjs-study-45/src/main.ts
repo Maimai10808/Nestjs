@@ -7,6 +7,8 @@ async function bootstrap() {
     AppModule,
   );
 
+  app.enableShutdownHooks();
+
   await app.listen(
     Number(process.env.PORT ?? 3000),
   );

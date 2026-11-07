@@ -75,6 +75,11 @@ export class AgentsGateway
     this.logger.log(
       `客户端断开：${client.id}`,
     );
+    // 本章任务由连接拥有，断开时取消，避免永远停留在人工审批。
+    for (const task of this.agentsService.findByClient(client.id)) {
+      this.agentsService.abortTask(task.id);
+      this.agentsService.cancelTask(task.id);
+    }
   }
 
   // 启动 Agent
