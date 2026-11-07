@@ -1,132 +1,111 @@
-<p align="center">
-  <a href="http://nestjs.com/" target="blank"><img src="https://nestjs.com/img/logo-small.svg" width="120" alt="Nest Logo" /></a>
-</p>
+# NestJS Study 41：加密与密码哈希
 
-[circleci-image]: https://img.shields.io/circleci/build/github/nestjs/nest/master?token=abc123def456
-[circleci-url]: https://circleci.com/gh/nestjs/nest
+模拟用户保存模型服务商 API Key，再由 Agent 内部解密使用。项目使用真实 AES-256-GCM 和 bcrypt，但模型执行仅延迟 1 秒返回模拟结果，不会发送真实付费请求。
 
-  <p align="center">A progressive <a href="http://nodejs.org" target="_blank">Node.js</a> framework for building efficient and scalable server-side applications.</p>
-    <p align="center">
-<a href="https://www.npmjs.com/~nestjscore" target="_blank"><img src="https://img.shields.io/npm/v/@nestjs/core.svg" alt="NPM Version" /></a>
-<a href="https://www.npmjs.com/~nestjscore" target="_blank"><img src="https://img.shields.io/npm/l/@nestjs/core.svg" alt="Package License" /></a>
-<a href="https://www.npmjs.com/~nestjscore" target="_blank"><img src="https://img.shields.io/npm/dm/@nestjs/common.svg" alt="NPM Downloads" /></a>
-<a href="https://circleci.com/gh/nestjs/nest" target="_blank"><img src="https://img.shields.io/circleci/build/github/nestjs/nest/master" alt="CircleCI" /></a>
-<a href="https://discord.gg/G7Qnnhy" target="_blank"><img src="https://img.shields.io/badge/discord-online-brightgreen.svg" alt="Discord"/></a>
-<a href="https://opencollective.com/nest#backer" target="_blank"><img src="https://opencollective.com/nest/backers/badge.svg" alt="Backers on Open Collective" /></a>
-<a href="https://opencollective.com/nest#sponsor" target="_blank"><img src="https://opencollective.com/nest/sponsors/badge.svg" alt="Sponsors on Open Collective" /></a>
-  <a href="https://paypal.me/kamilmysliwiec" target="_blank"><img src="https://img.shields.io/badge/Donate-PayPal-ff3f59.svg" alt="Donate us"/></a>
-    <a href="https://opencollective.com/nest#sponsor"  target="_blank"><img src="https://img.shields.io/badge/Support%20us-Open%20Collective-41B883.svg" alt="Support us"></a>
-  <a href="https://twitter.com/nestframework" target="_blank"><img src="https://img.shields.io/twitter/follow/nestframework.svg?style=social&label=Follow" alt="Follow us on Twitter"></a>
-</p>
-  <!--[![Backers on Open Collective](https://opencollective.com/nest/backers/badge.svg)](https://opencollective.com/nest#backer)
-  [![Sponsors on Open Collective](https://opencollective.com/nest/sponsors/badge.svg)](https://opencollective.com/nest#sponsor)-->
+## 学习目标
 
-## Description
+密码登录只需要验证原密码，不应能够还原，因此用 bcrypt 哈希。模型 Key 在调用时必须还原，因此用对称加密。这两个需求不能互相替代。
 
-[Nest](https://github.com/nestjs/nest) framework TypeScript starter repository.
+- AES-256-GCM：随机 12 字节 IV、认证标签和密文，既保护内容，也检测篡改。
+- bcrypt：每次哈希使用随机盐；同一密码可产生不同结果，验证使用 `compare()`。
+- `MaxPasswordBytes`：bcrypt 的长度限制按 UTF-8 字节计算，不能用 JavaScript 字符长度代替。
+- JWT：登录后才允许保存和执行 Provider；资源所有权由服务端的 `sub` 决定。
+- 公共响应类型：Provider API 只返回是否已配置 Key，不返回明文或密文。
 
-## Project setup
+## 项目结构与阅读顺序
 
-```bash
-$ pnpm install
+```text
+src/
+├── security/
+│   ├── encryption.service.ts         # v1:iv:tag:ciphertext
+│   ├── password.service.ts           # bcrypt 12 轮
+│   ├── security.controller.ts        # 固定教学文本的比较结果
+│   └── encryption.service.spec.ts    # 随机性、还原与篡改拒绝
+├── users/users.service.ts            # 启动时哈希教学账号密码
+├── auth/
+│   ├── auth.module.ts                # JWT 密钥与 HS256
+│   └── dto/password-byte-length.validator.ts
+├── providers/
+│   ├── providers.service.ts          # 所有权、加密保存与内部解密
+│   └── provider.interface.ts         # 存储与公共类型分离
+├── agents/agents.service.ts          # 模拟使用解密 Key
+└── main.ts                          # ValidationPipe
 ```
 
-## Compile and run the project
+推荐 `app.module.ts → security/encryption.service.ts → security/password.service.ts → auth/dto/login.dto.ts → providers/providers.service.ts → agents/agents.service.ts → test/app.e2e-spec.ts`。
 
-```bash
-# development
-$ pnpm run start
+## 核心执行流程
 
-# watch mode
-$ pnpm run start:dev
+`ProvidersService.create()` 加密后只把密文放入内存数组；`toPublic()` 只返回 `id`、`provider`、`hasApiKey`、`createdAt`。Agent 通过内部方法 `getDecryptedApiKey(userId, id)` 获取 Key，先检查所有权，再解密。API 没有“取回明文 Key”的路由。
 
-# production mode
-$ pnpm run start:prod
+```mermaid
+flowchart TD
+  A[登录取得 JWT] --> B[POST /providers]
+  B --> C[AuthGuard 与 DTO]
+  C --> D[随机 IV + AES-GCM 加密]
+  D --> E[内存中保存密文]
+  E --> F[POST /agents/run]
+  F --> G[检查所有权并验证认证标签后解密]
+  G --> H[模拟模型调用 1 秒]
+  H --> I[返回结果，不返回 Key]
 ```
 
-## Run tests
+GCM 的认证标签不是可省略的装饰字段；密文或标签被修改时必须拒绝解密。当前格式带 `v1`，便于理解未来格式迁移；项目尚未实现密钥轮换。
+
+## 启动
+
+需要 Node.js 24、pnpm，NestJS 12 / TypeScript 6。不需要外部服务。bcrypt 是原生依赖；仓库已有 `pnpm-workspace.yaml` 中的构建许可，安装失败时检查平台和安装日志，不要改成明文密码比较。
 
 ```bash
-# unit tests
-$ pnpm run test
-
-# e2e tests
-$ pnpm run test:e2e
-
-# test coverage
-$ pnpm run test:cov
+pnpm install --frozen-lockfile
+cp .env.example .env
+export JWT_SECRET="$(node -e "process.stdout.write(require('node:crypto').randomBytes(32).toString('hex'))")"
+export ENCRYPTION_KEY="$(node -e "process.stdout.write(require('node:crypto').randomBytes(32).toString('hex'))")"
+pnpm start:dev
 ```
 
-## Deployment
+两项配置都要求 64 位十六进制字符串。也可填入本地 `.env`。应分别生成，勿把示例密钥投入真实业务。默认监听 `127.0.0.1:3000`。
 
-When you're ready to deploy your NestJS application to production, there are some key steps you can take to ensure it runs as efficiently as possible. Check out the [deployment documentation](https://docs.nestjs.com/deployment) for more information.
+## 接口与验证
 
-If you are looking for a cloud-based platform to deploy your NestJS application, check out [Mau](https://mau.nestjs.com), our official platform for deploying NestJS applications on AWS. Mau makes deployment straightforward and fast, requiring just a few simple steps:
+| Method | 路由 | 说明 |
+|---|---|---|
+| GET | `/security/demo` | 固定教学字符串的加密、解密与哈希比较 |
+| POST | `/auth/login` | 教学账号登录，200 |
+| GET | `/auth/profile` | JWT 保护的用户资料 |
+| GET / POST | `/providers` | 查询自己的配置 / 保存加密 Key |
+| GET / DELETE | `/providers/:id` | 只访问自己的配置 |
+| POST | `/agents/run` | `providerId` 指定配置，模拟执行 |
 
 ```bash
-$ pnpm install -g @nestjs/mau
-$ mau deploy
+curl http://localhost:3000/security/demo
+curl http://localhost:3000/auth/login -H 'Content-Type: application/json' \
+  -d '{"username":"robin","password":"Robin123456!"}'
+TOKEN='替换为登录返回的 access_token'
+curl -X POST http://localhost:3000/providers -H "Authorization: Bearer $TOKEN" \
+  -H 'Content-Type: application/json' -d '{"provider":"openai","apiKey":"demo-not-real"}'
+curl http://localhost:3000/providers -H "Authorization: Bearer $TOKEN"
+curl -X POST http://localhost:3000/agents/run -H "Authorization: Bearer $TOKEN" \
+  -H 'Content-Type: application/json' -d '{"providerId":1}'
 ```
 
-With Mau, you can deploy your application in just a few clicks, allowing you to focus on building features rather than managing infrastructure.
-
-## Observability
-
-In production applications, observability is essential for understanding how your system behaves, detecting issues early, and maintaining reliable performance.
-
-[NestJS Observe](https://observe.nestjs.com) automatically instruments your NestJS application, giving you deep visibility into your system with minimal setup:
-
-- **Distributed tracing:** Follow requests across services and understand how they flow through your system.
-- **Waterfall analysis:** Visualize request execution and identify slow operations, bottlenecks, and unexpected delays.
-- **Performance analysis:** Analyze application performance in real time and quickly pinpoint areas that need optimization.
-- **Metrics:** Track key application and infrastructure metrics to understand system health and performance trends.
-- **Logging:** Centralize and correlate logs with traces and other telemetry to make debugging easier.
-- **Error tracking:** Detect errors quickly and investigate their root causes with the surrounding context.
-- **SLA monitoring:** Track service-level objectives and identify when your application is approaching or exceeding defined thresholds.
-- **Alarms and alerts:** Set up alerts for critical errors, performance degradation, SLA violations, and other anomalies so your team can react quickly.
-
-To add it to this project, run this and approve the code it prints at [observe.nestjs.com/link](https://observe.nestjs.com/link) - signing up for free if you have no account:
+新进程第一条配置 ID 为 1。`/security/demo` 中两个密文不同、解密匹配、两个哈希不同、正确密码 true、错误密码 false。配置响应不应包含 Key。另一个教学账号 `alan / Alan123456!` 访问该配置返回 403。
 
 ```bash
-$ npx @nestjs/observe link
+pnpm exec tsc --noEmit --incremental false
+pnpm lint
+pnpm test
+pnpm test:e2e
+pnpm build
+pnpm start:prod
 ```
 
-It installs `@nestjs/observe`, wires it into `AppModule` and `main.ts`, and writes the app key and secret into `.env`, which every `nest start` script (`start`, `start:dev`, `start:debug`) then loads. In production, set `OBSERVE_APP_KEY` and `OBSERVE_APP_SECRET` in the environment instead.
+单测覆盖密文随机性、还原和篡改拒绝；E2E 运行真正构建产物，覆盖登录、72 字节边界、Key 响应与所有权。`AppController` 模板未注册进业务模块，不应以 `/` 的 Hello World 判断业务是否完成。
 
-Or do it by hand:
+## 限制、练习与总结
 
-```bash
-$ pnpm install @nestjs/observe
-```
+内存数据重启丢失；教学账号与密码固定；Key 管理、持久化、轮换、访问审计都未实现。公开 `/security/demo` 只处理固定假数据，生产不应保留可无限计算 bcrypt 的演示接口。将来接入真实模型前仍需要超时、授权和成本控制。
 
-Then follow the [setup guide](https://docs.nestjs.com/observability/sdk) - it takes a single import and an app key.
+练习：改变认证标签观察拒绝；比较相同明文多次加密；输入超过 72 字节的中文密码观察 DTO。重点掌握可逆加密与不可逆密码哈希的业务边界。
 
-The free plan needs no payment details and covers 300,000 events a month. You can also browse the [live demo](https://www.observe-demo.nestjs.com/dashboard) first - the whole dashboard over a busy service's data, with nothing to install.
-
-## Resources
-
-Check out a few resources that may come in handy when working with NestJS:
-
-- Visit the [NestJS Documentation](https://docs.nestjs.com) to learn more about the framework.
-- For questions and support, please visit our [Discord channel](https://discord.gg/G7Qnnhy).
-- To dive deeper and get more hands-on experience, check out our official video [courses](https://courses.nestjs.com/).
-- Deploy your application to AWS with the help of [NestJS Mau](https://mau.nestjs.com) in just a few clicks.
-- Auto-instrument your application with [NestJS Observe](https://observe.nestjs.com). Distributed tracing, metrics, and logging made easy. Error tracking and performance monitoring for your NestJS applications.
-- Visualize your application graph and interact with the NestJS application in real-time using [NestJS Devtools](https://devtools.nestjs.com).
-- Need help with your project (part-time to full-time)? Check out our official [enterprise support](https://enterprise.nestjs.com).
-- To stay in the loop and get updates, follow us on [X](https://x.com/nestframework) and [LinkedIn](https://linkedin.com/company/nestjs).
-- Looking for a job, or have a job to offer? Check out our official [Jobs board](https://jobs.nestjs.com).
-
-## Support
-
-Nest is an MIT-licensed open source project. It can grow thanks to the sponsors and support by the amazing backers. If you'd like to join them, please [read more here](https://docs.nestjs.com/support).
-
-## Stay in touch
-
-- Author - [Kamil Myśliwiec](https://twitter.com/kammysliwiec)
-- Website - [https://nestjs.com](https://nestjs.com/)
-- Twitter - [@nestframework](https://twitter.com/nestframework)
-
-## License
-
-Nest is [MIT licensed](https://github.com/nestjs/nest/blob/master/LICENSE).
+参考：[中文加密与哈希文档](https://docs.nestjs.cn/security/encryption-and-hashing/)、[官方文档](https://docs.nestjs.com/security/encryption-and-hashing)。
