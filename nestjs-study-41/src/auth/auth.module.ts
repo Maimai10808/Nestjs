@@ -75,6 +75,7 @@ import { AuthGuard } from './auth.guard.js';
   ],
 
   exports: [
+    JwtModule,
     AuthService,
     AuthGuard,
   ],
