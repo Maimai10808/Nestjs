@@ -20,7 +20,7 @@ import {
   type ResearchRequest,
   type ResearchResult,
   type ResearchSubmittedEvent,
-} from '@app/contracts';
+} from '../../../../libs/contracts/src/index.js';
 
 @Injectable()
 export class ResearchService {
@@ -57,23 +57,26 @@ export class ResearchService {
   }
 
   async getModels() {
-    return firstValueFrom(
-      this.client
-        .send(
+    try {
+      return await firstValueFrom(
+        this.client.send<Array<{ id: string; provider: string }>>(
           RESEARCH_PATTERNS.MODELS,
           {},
-        )
-        .pipe(
-          timeout(3000),
-        ),
-    );
+        ).pipe(timeout(3000)),
+      );
+    } catch (error) {
+      if (error instanceof TimeoutError) {
+        throw new GatewayTimeoutException('AI Worker 响应超时');
+      }
+      throw new ServiceUnavailableException('AI Worker 暂时不可用');
+    }
   }
 
   async slow() {
     try {
       return await firstValueFrom(
         this.client
-          .send(
+          .send<{ message: string }>(
             RESEARCH_PATTERNS.SLOW,
             {},
           )

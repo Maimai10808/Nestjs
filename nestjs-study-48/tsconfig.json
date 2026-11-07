@@ -23,13 +23,13 @@
       "node"
     ]
   },
-  "files": [],
-  "references": [
-    {
-      "path": "./apps/nestjs-study-48/tsconfig.app.json"
-    },
-    {
-      "path": "./apps/agent-worker/tsconfig.app.json"
-    }
+  "include": [
+    "apps/**/*.ts",
+    "libs/**/*.ts",
+    "vitest*.ts"
+  ],
+  "exclude": [
+    "node_modules",
+    "dist"
   ]
 }

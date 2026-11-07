@@ -19,10 +19,12 @@ async function bootstrap() {
         options: {
           host: '127.0.0.1',
 
-          port: 4001,
+          port: Number(process.env.WORKER_TCP_PORT ?? 4001),
         },
       },
     );
+
+  app.enableShutdownHooks();
 
   await app.listen();
 

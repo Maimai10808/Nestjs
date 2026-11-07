@@ -21,8 +21,10 @@ async function bootstrap() {
     }),
   );
 
+  app.enableShutdownHooks();
+
   await app.listen(
-    3000,
+    Number(process.env.PORT ?? 3000),
     '127.0.0.1',
   );
 

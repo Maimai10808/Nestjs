@@ -10,7 +10,7 @@ import {
   RESEARCH_PATTERNS,
   type ResearchRequest,
   type ResearchSubmittedEvent,
-} from '@app/contracts';
+} from '../../../../libs/contracts/src/index.js';
 
 import { ResearchService } from './research.service.js';
 

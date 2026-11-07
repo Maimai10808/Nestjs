@@ -6,7 +6,7 @@ import type {
   ResearchRequest,
   ResearchResult,
   ResearchSubmittedEvent,
-} from '@app/contracts';
+} from '../../../../libs/contracts/src/index.js';
 
 @Injectable()
 export class ResearchService {

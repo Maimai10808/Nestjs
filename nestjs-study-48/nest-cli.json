@@ -1,14 +1,14 @@
 {
   "$schema": "https://json.schemastore.org/nest-cli",
   "collection": "@nestjs/schematics",
-  "sourceRoot": "apps/nestjs-study-48/src",
+  "sourceRoot": "apps/api/src",
   "compilerOptions": {
     "deleteOutDir": true,
-    "builder": "rspack",
-    "tsConfigPath": "apps/nestjs-study-48/tsconfig.app.json"
+    "builder": "tsc",
+    "tsConfigPath": "apps/api/tsconfig.app.json"
   },
   "monorepo": true,
-  "root": "apps/nestjs-study-48",
+  "root": "apps/api",
   "projects": {
     "agent-worker": {
       "type": "application",
@@ -19,13 +19,13 @@
         "tsConfigPath": "apps/agent-worker/tsconfig.app.json"
       }
     },
-    "nestjs-study-48": {
+    "api": {
       "type": "application",
-      "root": "apps/nestjs-study-48",
+      "root": "apps/api",
       "entryFile": "main",
-      "sourceRoot": "apps/nestjs-study-48/src",
+      "sourceRoot": "apps/api/src",
       "compilerOptions": {
-        "tsConfigPath": "apps/nestjs-study-48/tsconfig.app.json"
+        "tsConfigPath": "apps/api/tsconfig.app.json"
       }
     }
   }
