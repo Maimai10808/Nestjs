@@ -4,7 +4,7 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 
-interface Agent {
+export interface Agent {
   id: number;
   ownerId: number;
   name: string;

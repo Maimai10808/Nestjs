@@ -17,7 +17,7 @@ import {
 @Controller('security')
 export class SecurityController {
   private readonly csrf = createCsrfProtection(
-    process.env.CSRF_SECRET!,
+    process.env.CSRF_SECRET ?? '',
   );
 
   // 获取 CSRF Token
@@ -30,7 +30,7 @@ export class SecurityController {
     request.session.csrfInitialized = true;
 
     const csrfToken =
-      this.csrf.generateToken(
+      this.csrf.generateCsrfToken(
         request,
         response,
       );

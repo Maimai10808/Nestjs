@@ -4,6 +4,8 @@ import type { Request } from 'express';
 export function createCsrfProtection(
   secret: string,
 ) {
+  if (secret.length < 32) throw new Error('CSRF_SECRET 配置无效');
+
   return doubleCsrf({
     getSecret: () => secret,
 
@@ -21,9 +23,8 @@ export function createCsrfProtection(
     },
 
     getCsrfTokenFromRequest: (req: Request) => {
-      return req.headers['x-csrf-token'] as
-        | string
-        | undefined;
+      const token = req.headers['x-csrf-token'];
+      return typeof token === 'string' ? token : undefined;
     },
 
     ignoredMethods: [

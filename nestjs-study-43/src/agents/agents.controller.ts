@@ -18,6 +18,7 @@ import { AgentsService } from './agents.service.js';
 import { SessionGuard } from '../auth/session.guard.js';
 
 import { CreateAgentDto } from './dto/create-agent.dto.js';
+import { UpdateAgentDto } from './dto/update-agent.dto.js';
 
 @Controller('agents')
 export class AgentsController {
@@ -58,12 +59,12 @@ export class AgentsController {
   update(
     @Req() request: Request,
     @Param('id', ParseIntPipe) id: number,
-    @Body('name') name: string,
+    @Body() dto: UpdateAgentDto,
   ) {
     return this.agentsService.update(
       request.session.userId!,
       id,
-      name,
+      dto.name,
     );
   }
 
