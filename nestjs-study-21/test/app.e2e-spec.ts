@@ -33,6 +33,24 @@ describe('validation through actual module configuration', () => {
     const result = await request(app.getHttpServer()).post(`/agents/${created.body.id}/run`).send({ input: 'Explain DTO', options: { maxTokens: 32 } }).expect(200);
     expect(result.body.options.maxTokens).toBe(32);
   });
+  it('preserves omitted fields through partial and empty updates', async () => {
+    const created = await request(app.getHttpServer()).post('/agents')
+      .send({ ...valid, description: 'Keep this description', enabled: false }).expect(201);
+    const patched = await request(app.getHttpServer()).patch(`/agents/${created.body.id}`)
+      .send({ name: 'Renamed Agent' }).expect(200);
+    expect(patched.body).toMatchObject({
+      name: 'Renamed Agent', description: 'Keep this description', enabled: false,
+      model: valid.model, temperature: valid.temperature, maxSteps: valid.maxSteps,
+      tools: valid.tools,
+    });
+    const empty = await request(app.getHttpServer()).patch(`/agents/${created.body.id}`)
+      .send({}).expect(200);
+    expect(empty.body).toMatchObject({
+      id: created.body.id, name: 'Renamed Agent', description: 'Keep this description',
+      enabled: false, model: valid.model, temperature: valid.temperature,
+      maxSteps: valid.maxSteps, tools: valid.tools, createdAt: created.body.createdAt,
+    });
+  });
   it('validates the whole bulk input and parses id arrays', async () => {
     await request(app.getHttpServer()).post('/agents/bulk').send([valid, { ...valid, name: 'x' }]).expect(400);
     const created = await request(app.getHttpServer()).post('/agents/bulk').send([valid, { ...valid, name: 'Coding Agent' }]).expect(201);
