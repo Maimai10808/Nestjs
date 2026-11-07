@@ -2,6 +2,8 @@ import {
   Injectable,
   Logger,
   NotFoundException,
+  ServiceUnavailableException,
+  type OnModuleDestroy,
 } from '@nestjs/common';
 
 import { randomUUID } from 'node:crypto';
@@ -15,7 +17,15 @@ import type {
 } from './dto/create-research.dto.js';
 
 @Injectable()
-export class ResearchService {
+export class ResearchService implements OnModuleDestroy {
+  private shuttingDown = false;
+  private readonly pendingExecutions = new Set<Promise<void>>();
+
+  async onModuleDestroy(): Promise<void> {
+    this.shuttingDown = true;
+    await Promise.all(this.pendingExecutions);
+  }
+
   private readonly logger = new Logger(
     ResearchService.name,
   );
@@ -24,6 +34,9 @@ export class ResearchService {
     new Map<string, ResearchTask>();
 
   create(dto: CreateResearchDto): ResearchTask {
+    if (this.shuttingDown) {
+      throw new ServiceUnavailableException('服务正在关闭');
+    }
     const now = new Date().toISOString();
 
     const task: ResearchTask = {
@@ -46,7 +59,9 @@ export class ResearchService {
 
     this.tasks.set(task.id, task);
 
-    void this.execute(task.id);
+    const execution = this.execute(task.id);
+    this.pendingExecutions.add(execution);
+    void execution.finally(() => this.pendingExecutions.delete(execution));
 
     return task;
   }
