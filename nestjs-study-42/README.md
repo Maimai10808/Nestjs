@@ -1,132 +1,104 @@
-<p align="center">
-  <a href="http://nestjs.com/" target="blank"><img src="https://nestjs.com/img/logo-small.svg" width="120" alt="Nest Logo" /></a>
-</p>
+# NestJS Study 42：Helmet 与 HTTP 安全响应头
 
-[circleci-image]: https://img.shields.io/circleci/build/github/nestjs/nest/master?token=abc123def456
-[circleci-url]: https://circleci.com/gh/nestjs/nest
+给一个 Handlebars 研究报告展示站点添加 Helmet，观察 HTML、JSON 和静态资源上的安全响应头。本章报告内容来自内存假数据，不执行研究或模型请求。
 
-  <p align="center">A progressive <a href="http://nodejs.org" target="_blank">Node.js</a> framework for building efficient and scalable server-side applications.</p>
-    <p align="center">
-<a href="https://www.npmjs.com/~nestjscore" target="_blank"><img src="https://img.shields.io/npm/v/@nestjs/core.svg" alt="NPM Version" /></a>
-<a href="https://www.npmjs.com/~nestjscore" target="_blank"><img src="https://img.shields.io/npm/l/@nestjs/core.svg" alt="Package License" /></a>
-<a href="https://www.npmjs.com/~nestjscore" target="_blank"><img src="https://img.shields.io/npm/dm/@nestjs/common.svg" alt="NPM Downloads" /></a>
-<a href="https://circleci.com/gh/nestjs/nest" target="_blank"><img src="https://img.shields.io/circleci/build/github/nestjs/nest/master" alt="CircleCI" /></a>
-<a href="https://discord.gg/G7Qnnhy" target="_blank"><img src="https://img.shields.io/badge/discord-online-brightgreen.svg" alt="Discord"/></a>
-<a href="https://opencollective.com/nest#backer" target="_blank"><img src="https://opencollective.com/nest/backers/badge.svg" alt="Backers on Open Collective" /></a>
-<a href="https://opencollective.com/nest#sponsor" target="_blank"><img src="https://opencollective.com/nest/sponsors/badge.svg" alt="Sponsors on Open Collective" /></a>
-  <a href="https://paypal.me/kamilmysliwiec" target="_blank"><img src="https://img.shields.io/badge/Donate-PayPal-ff3f59.svg" alt="Donate us"/></a>
-    <a href="https://opencollective.com/nest#sponsor"  target="_blank"><img src="https://img.shields.io/badge/Support%20us-Open%20Collective-41B883.svg" alt="Support us"></a>
-  <a href="https://twitter.com/nestframework" target="_blank"><img src="https://img.shields.io/twitter/follow/nestframework.svg?style=social&label=Follow" alt="Follow us on Twitter"></a>
-</p>
-  <!--[![Backers on Open Collective](https://opencollective.com/nest/backers/badge.svg)](https://opencollective.com/nest#backer)
-  [![Sponsors on Open Collective](https://opencollective.com/nest/sponsors/badge.svg)](https://opencollective.com/nest#sponsor)-->
+## 核心知识与业务场景
 
-## Description
+一个能够渲染报告的网页还需要告诉浏览器：哪些脚本、样式和嵌入来源可以加载。Helmet 通过 HTTP 响应头表达这些策略；它不会替代登录、授权、输入验证或模板转义。
 
-[Nest](https://github.com/nestjs/nest) framework TypeScript starter repository.
+- `Content-Security-Policy`：本站脚本和样式只允许 `'self'`，禁止对象资源及第三方 iframe 嵌入。
+- `X-Frame-Options: DENY` 与 `frame-ancestors 'none'`：限制页面被嵌入。
+- `X-Content-Type-Options: nosniff`：限制浏览器猜测内容类型。
+- `Referrer-Policy: no-referrer`：控制外发请求的来源信息。
+- `@Render()`、静态资源与构建资产：安全头必须和真正能够展示的页面一起验证。
 
-## Project setup
+## 项目结构与阅读顺序
 
-```bash
-$ pnpm install
+```text
+src/
+├── main.ts                          # Helmet → 静态资源 → 模板 → listen
+├── app.module.ts                    # HomeController 放在 controllers
+├── home.controller.ts               # 首页
+├── reports/
+│   ├── reports.controller.ts        # 列表、JSON、HTML 预览
+│   └── reports.service.ts           # 三份内存报告
+├── security/security.controller.ts  # 观察响应头的接口
+└── health/health.controller.ts
+views/
+├── layouts/app.hbs                  # 可信模板中的 body 插槽
+├── index.hbs
+├── reports.hbs
+└── report-preview.hbs
+public/css/style.css
+nest-cli.json                        # 将 views/public 复制到 dist 子目录
 ```
 
-## Compile and run the project
+推荐 `app.module.ts → main.ts → home.controller.ts → reports/reports.controller.ts → views/layouts/app.hbs → views/report-preview.hbs → test/app.e2e-spec.ts`。先确认控制器注册，再观察中间件顺序如何影响所有响应。
 
-```bash
-# development
-$ pnpm run start
+## 核心实现
 
-# watch mode
-$ pnpm run start:dev
+`main.ts` 在静态文件和路由前安装 `helmet()`。模板数据用 `{{report.content}}` 输出，Handlebars 会转义；布局中的 `{{{body}}}` 用于装入受信任的已渲染模板，不能据此给用户原始 HTML 开一个不受限的出口。
 
-# production mode
-$ pnpm run start:prod
+CLI 构建会将模板复制到 `dist/views`、样式复制到 `dist/public`。运行时根据 `import.meta.dirname` 定位资产，所以从其他目录执行 `node /绝对路径/dist/main.js` 也能找到页面，不依赖启动时的 `cwd`。
+
+```mermaid
+flowchart TD
+  A[浏览器请求] --> B[Helmet 设置响应头]
+  B --> C{资源类型}
+  C --> D[public 静态样式]
+  C --> E[Controller 与 ReportsService]
+  E --> F[JSON 或 Handlebars 渲染]
+  F --> G[带安全头的响应]
+  D --> G
 ```
 
-## Run tests
+CSP 里的 `'self'` 不允许内联脚本和内联样式。增加页面交互时，应优先使用本站外部文件，或研究 nonce/hash，而不是直接把 `unsafe-inline` 放宽到所有页面。
+
+## 启动与接口
+
+需要 Node.js 24、pnpm，NestJS 12 / TypeScript 6。不需要 `.env`、数据库或外部 API。默认监听 `127.0.0.1:3000`。
 
 ```bash
-# unit tests
-$ pnpm run test
-
-# e2e tests
-$ pnpm run test:e2e
-
-# test coverage
-$ pnpm run test:cov
+pnpm install --frozen-lockfile
+pnpm start:dev
 ```
 
-## Deployment
-
-When you're ready to deploy your NestJS application to production, there are some key steps you can take to ensure it runs as efficiently as possible. Check out the [deployment documentation](https://docs.nestjs.com/deployment) for more information.
-
-If you are looking for a cloud-based platform to deploy your NestJS application, check out [Mau](https://mau.nestjs.com), our official platform for deploying NestJS applications on AWS. Mau makes deployment straightforward and fast, requiring just a few simple steps:
+| Method | 路由 | 返回 |
+|---|---|---|
+| GET | `/` | 首页 HTML |
+| GET | `/reports` | 报告列表 HTML |
+| GET | `/reports/:id` | 报告 JSON |
+| GET | `/reports/:id/preview` | 报告预览 HTML |
+| GET | `/security/headers` | 观察响应头的说明 |
+| GET | `/security/csp-demo` | CSP 示例页面 |
+| GET | `/security/frame-demo` | iframe 防护示例页面 |
+| GET | `/health` | JSON 健康检查 |
+| GET | `/css/style.css` | 本站样式 |
 
 ```bash
-$ pnpm install -g @nestjs/mau
-$ mau deploy
+curl -i http://localhost:3000/security/headers
+curl -i http://localhost:3000/reports/1/preview
+curl -i http://localhost:3000/reports/999
+curl -I http://localhost:3000/css/style.css
 ```
 
-With Mau, you can deploy your application in just a few clicks, allowing you to focus on building features rather than managing infrastructure.
-
-## Observability
-
-In production applications, observability is essential for understanding how your system behaves, detecting issues early, and maintaining reliable performance.
-
-[NestJS Observe](https://observe.nestjs.com) automatically instruments your NestJS application, giving you deep visibility into your system with minimal setup:
-
-- **Distributed tracing:** Follow requests across services and understand how they flow through your system.
-- **Waterfall analysis:** Visualize request execution and identify slow operations, bottlenecks, and unexpected delays.
-- **Performance analysis:** Analyze application performance in real time and quickly pinpoint areas that need optimization.
-- **Metrics:** Track key application and infrastructure metrics to understand system health and performance trends.
-- **Logging:** Centralize and correlate logs with traces and other telemetry to make debugging easier.
-- **Error tracking:** Detect errors quickly and investigate their root causes with the surrounding context.
-- **SLA monitoring:** Track service-level objectives and identify when your application is approaching or exceeding defined thresholds.
-- **Alarms and alerts:** Set up alerts for critical errors, performance degradation, SLA violations, and other anomalies so your team can react quickly.
-
-To add it to this project, run this and approve the code it prints at [observe.nestjs.com/link](https://observe.nestjs.com/link) - signing up for free if you have no account:
+预期前两个响应带 CSP、DENY、nosniff 和 no-referrer；不存在的报告返回 404。浏览器访问 `/reports` 后点击预览，可观察样式是否正常、开发者工具是否存在 CSP 拒绝。
 
 ```bash
-$ npx @nestjs/observe link
+pnpm exec tsc --noEmit --incremental false
+pnpm lint
+pnpm test
+pnpm test:e2e
+pnpm build
+pnpm start:prod
 ```
 
-It installs `@nestjs/observe`, wires it into `AppModule` and `main.ts`, and writes the app key and secret into `.env`, which every `nest start` script (`start`, `start:dev`, `start:debug`) then loads. In production, set `OBSERVE_APP_KEY` and `OBSERVE_APP_SECRET` in the environment instead.
+HTTP E2E 从临时工作目录启动构建产物，验证模板、样式、缺失报告与实际响应头。保留的 AppController 单测只验证模板类，不代表 Helmet 生效；应以 HTTP 测试为依据。
 
-Or do it by hand:
+## 限制、练习与总结
 
-```bash
-$ pnpm install @nestjs/observe
-```
+本章未提供用户登录，也没有用户上传的 HTML。Helmet 默认 HSTS 和 HTTPS 相关策略需要结合真实 HTTPS 部署评估；本地 HTTP 不会因此自动获得 TLS。浏览器策略不等于数据访问控制。
 
-Then follow the [setup guide](https://docs.nestjs.com/observability/sdk) - it takes a single import and an app key.
+练习：加入一个本站脚本文件；对比内联与外部样式的 CSP 行为；检查 JSON、404 和静态文件的安全头。重点是把安全策略和真实资源加载一起验证。
 
-The free plan needs no payment details and covers 300,000 events a month. You can also browse the [live demo](https://www.observe-demo.nestjs.com/dashboard) first - the whole dashboard over a busy service's data, with nothing to install.
-
-## Resources
-
-Check out a few resources that may come in handy when working with NestJS:
-
-- Visit the [NestJS Documentation](https://docs.nestjs.com) to learn more about the framework.
-- For questions and support, please visit our [Discord channel](https://discord.gg/G7Qnnhy).
-- To dive deeper and get more hands-on experience, check out our official video [courses](https://courses.nestjs.com/).
-- Deploy your application to AWS with the help of [NestJS Mau](https://mau.nestjs.com) in just a few clicks.
-- Auto-instrument your application with [NestJS Observe](https://observe.nestjs.com). Distributed tracing, metrics, and logging made easy. Error tracking and performance monitoring for your NestJS applications.
-- Visualize your application graph and interact with the NestJS application in real-time using [NestJS Devtools](https://devtools.nestjs.com).
-- Need help with your project (part-time to full-time)? Check out our official [enterprise support](https://enterprise.nestjs.com).
-- To stay in the loop and get updates, follow us on [X](https://x.com/nestframework) and [LinkedIn](https://linkedin.com/company/nestjs).
-- Looking for a job, or have a job to offer? Check out our official [Jobs board](https://jobs.nestjs.com).
-
-## Support
-
-Nest is an MIT-licensed open source project. It can grow thanks to the sponsors and support by the amazing backers. If you'd like to join them, please [read more here](https://docs.nestjs.com/support).
-
-## Stay in touch
-
-- Author - [Kamil Myśliwiec](https://twitter.com/kammysliwiec)
-- Website - [https://nestjs.com](https://nestjs.com/)
-- Twitter - [@nestframework](https://twitter.com/nestframework)
-
-## License
-
-Nest is [MIT licensed](https://github.com/nestjs/nest/blob/master/LICENSE).
+参考：[中文 Helmet 文档](https://docs.nestjs.cn/security/helmet/)、[官方 Helmet 文档](https://docs.nestjs.com/security/helmet)。
